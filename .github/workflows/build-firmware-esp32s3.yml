@@ -65,6 +65,10 @@ jobs:
           for f in bootloader.bin partitions.bin firmware.bin spiffs.bin firmware.elf ota_data_initial.bin; do
             if [ -f "$B/$f" ]; then cp "$B/$f" "$OUT/"; else echo "missing: $f"; fi
           done
+          # Save the exact settings this build used, for comparing against a local build.
+          for f in sdkconfig.${{ matrix.env }} "$B/config/sdkconfig.h" dependencies.lock; do
+            if [ -f "$f" ]; then cp "$f" "$OUT/"; else echo "missing: $f"; fi
+          done
           ARGS="0x0 $B/bootloader.bin 0x8000 $B/partitions.bin"
           if [ -f "$B/ota_data_initial.bin" ]; then ARGS="$ARGS 0x19000 $B/ota_data_initial.bin"; fi
           ARGS="$ARGS 0x20000 $B/firmware.bin 0x620000 $B/spiffs.bin"
