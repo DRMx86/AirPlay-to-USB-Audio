@@ -1,0 +1,78 @@
+name: Build firmware (ESP-IDF)
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # only needed for the tag release step at the bottom
+
+jobs:
+  build:
+    name: Build esp32s3
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.5   # ESP-IDF 5.5, same major version as the Windows build
+
+    steps:
+      - name: Checkout (with u8g2 submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build with idf.py
+        shell: bash
+        run: |
+          git config --global --add safe.directory '*'
+          . "$IDF_PATH/export.sh"
+          export IDF_TARGET=esp32s3
+          # If a committed `sdkconfig` exists it is used as-is.
+          # Otherwise ESP-IDF uses sdkconfig.defaults + sdkconfig.defaults.esp32s3.
+          if [ -f sdkconfig ]; then echo ">> using committed sdkconfig"; else echo ">> no sdkconfig, using defaults"; fi
+          idf.py build
+          # One image flashable at 0x0 (built from this project's own flash settings).
+          idf.py merge-bin
+          ls -la build/*.bin
+
+      - name: Collect output
+        shell: bash
+        run: |
+          mkdir -p out
+          for f in \
+            build/merged-binary.bin \
+            build/bootloader/bootloader.bin \
+            build/partition_table/partition-table.bin \
+            build/ota_data_initial.bin \
+            build/airplay2-receiver.bin \
+            build/airplay2-receiver.elf \
+            build/storage.bin \
+            sdkconfig \
+            dependencies.lock; do
+            if [ -f "$f" ]; then cp "$f" out/; else echo "missing: $f"; fi
+          done
+          [ -f out/merged-binary.bin ] && mv out/merged-binary.bin out/merged-airplay-esp32s3.bin
+          ls -la out
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-esp32s3
+          path: out/
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware-esp32s3
+          path: dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/merged-airplay-esp32s3.bin
