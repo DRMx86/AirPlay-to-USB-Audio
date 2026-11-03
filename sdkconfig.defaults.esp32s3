@@ -50,3 +50,6 @@ CONFIG_I2S_GND_IO=14
 # CONFIG_LV_FONT_DEFAULT_MONTSERRAT_14=y
 #
 # See components/display/README.md for full setup instructions.
+
+# Output audio as a USB Audio Class (UAC) device
+CONFIG_AUDIO_OUTPUT_USB=y
