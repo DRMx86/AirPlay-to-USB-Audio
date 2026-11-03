@@ -28,10 +28,16 @@ jobs:
           git config --global --add safe.directory '*'
           . "$IDF_PATH/export.sh"
           export IDF_TARGET=esp32s3
-          # If a committed `sdkconfig` exists it is used as-is.
-          # Otherwise ESP-IDF uses sdkconfig.defaults + sdkconfig.defaults.esp32s3.
-          if [ -f sdkconfig ]; then echo ">> using committed sdkconfig"; else echo ">> no sdkconfig, using defaults"; fi
+          # Pass 1: let ESP-IDF download the managed components (lvgl etc.) using
+          # the defaults. With a committed sdkconfig but no downloaded components,
+          # the component manager fails with "MissingKconfigError: LV_USE_FREETYPE".
+          if [ -f sdkconfig ]; then mv sdkconfig sdkconfig.mine; fi
+          idf.py reconfigure
+          # Pass 2: put the committed sdkconfig back and build with it as-is.
+          if [ -f sdkconfig.mine ]; then cp sdkconfig.mine sdkconfig; echo ">> using committed sdkconfig"; fi
           idf.py build
+          echo ">> audio output setting used by this build:"
+          grep -n "^CONFIG_AUDIO_OUTPUT" sdkconfig || true
           # One image flashable at 0x0 (built from this project's own flash settings).
           idf.py merge-bin
           ls -la build/*.bin
