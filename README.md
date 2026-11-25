@@ -1,107 +1,106 @@
-<div align="center">
-  
-# AirPlay-to-USB-Audio
+# I2S-to-USB-Audio
 
-AirPlay ESP32 - Modified Version
+An ESP32-S3 firmware that takes a stereo **I2S** audio stream in and presents it to a
+computer or USB amplifier as a **USB Audio Class** input device (a "USB microphone").
 
-This repository is a **modified fork** of the original [airplay-esp32](https://github.com/rbouteiller/airplay-esp32) project by [rbouteiller](https://github.com/rbouteiller).
-
-<div align="center">
-
-<img src="docs/logo_airplay_esp32.png" alt="AirPlay ESP32" width="400">
-
-# ESP32 AirPlay 2 Receiver
-
-**Stream music from your Apple devices — or from any phone over Bluetooth — to any speaker for about $10**
-
-[![GitHub stars](https://img.shields.io/github/stars/rbouteiller/airplay-esp32?style=flat-square)](https://github.com/rbouteiller/airplay-esp32/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/rbouteiller/airplay-esp32?style=flat-square)](https://github.com/rbouteiller/airplay-esp32/network)
-[![License](https://img.shields.io/badge/license-Non--Commercial-blue?style=flat-square)](LICENSE)
-[![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.5+-red?style=flat-square)](https://docs.espressif.com/projects/esp-idf/)
-[![Platform](https://img.shields.io/badge/platform-ESP32%20%7C%20S2%20%7C%20S3%20%7C%20C5-green?style=flat-square)](https://www.espressif.com/en/products/socs)
-
-### [Documentation](https://rbouteiller.github.io/airplay-esp32/) · [Install from your browser](https://rbouteiller.github.io/airplay-esp32/getting-started/flashing/) · [Troubleshooting](https://rbouteiller.github.io/airplay-esp32/troubleshooting/)
-
-</div>
-
----
-
-## What is this?
-
-This turns a cheap ESP32 board into a wireless AirPlay 2 speaker. Plug it into any
-amplifier or powered speakers and it shows up on your iPhone, iPad or Mac just like a
-HomePod or an AirPlay TV.
-
-Works with **ESP32**, **ESP32-S2**, **ESP32-S3** and **ESP32-C5** chips, including the
-[SqueezeAMP](https://github.com/philippe44/SqueezeAMP) (ESP32 + TAS5756) and
-[Esparagus Audio Brick](https://sonocotta.com/espragus-audio-brick/) (ESP32 + TAS5825M)
-boards, which have amplifiers built in.
-
-ESP32-based boards also support **Bluetooth A2DP**, so anything that can pair with a
-Bluetooth speaker can play to them when AirPlay is idle. The Esparagus Audio Brick
-additionally supports **wired Ethernet** through an optional W5500 module.
-
-**No cloud. No app. Just tap and play.**
-
-## Quick start
-
-The fastest route is the browser installer — no toolchain, no command line:
-
-**[→ Install from your browser](https://rbouteiller.github.io/airplay-esp32/getting-started/flashing/)**
-
-Building from parts instead? You need an ESP32-S3 dev board, a PCM5102A DAC and a female
-pin header, roughly $10 total, and no soldering. See the
-[getting started guide](https://rbouteiller.github.io/airplay-esp32/getting-started/).
-
-Building from source:
-
-```bash
-git clone --recursive https://github.com/rbouteiller/airplay-esp32
-cd airplay-esp32
-pio run -e esp32s3 -t upload
-pio run -e esp32s3 -t uploadfs   # required — writes the web UI to SPIFFS
+```
+ I2S source ──BCK/WS/DATA──▶ ESP32-S3 ──USB (UAC, 48 kHz 16-bit stereo)──▶ PC / USB amp
 ```
 
-## Features
+This is a derivative of [airplay-esp32](https://github.com/rbouteiller/airplay-esp32) by
+[rbouteiller](https://github.com/rbouteiller). The AirPlay 2, Bluetooth, WiFi/Ethernet,
+web UI, display and button code has been removed from this branch; only the USB audio
+output and the resampler were kept. See [LICENSE](LICENSE) — **non-commercial use only**.
 
-- **AirPlay 2** — appears natively in Control Center and every AirPlay-capable app
-- **ALAC and AAC decoding** — live streaming (Siri, calls) and music playback
-- **Multi-room** — PTP-based timing for synchronised playback
-- **Bluetooth A2DP** — receive audio from phones and tablets (ESP32 boards only)
-- **W5500 Ethernet** — wired networking with automatic WiFi failover
-- **Web configuration** and **OTA updates** — USB is only needed for the first flash
-- **48 kHz output** — optional 44.1 → 48 kHz conversion via a sinc resampler
-- **Displays** — optional OLED or 320×170 colour TFT with track metadata
-- **Hardware buttons** — optional play/pause, volume and track skip
+## Hardware
 
-Audio only, one speaker per board, and a decent WiFi signal is required.
+- An ESP32-S3 board with a native USB port (GPIO19 = D−, GPIO20 = D+). ESP32-S2 and
+  ESP32-P4 also have USB-OTG but are untested here. The classic ESP32 has no USB device
+  mode and is not supported.
+- An I2S source: an ADC (PCM1808, ...), an S/PDIF-to-I2S receiver, a Raspberry Pi,
+  another microcontroller, etc.
 
-## Documentation
+Default wiring (change in `menuconfig`):
 
-| | |
-| --- | --- |
-| [Getting started](https://rbouteiller.github.io/airplay-esp32/getting-started/) | Shopping list, assembly, flashing, first boot |
-| [Supported boards](https://rbouteiller.github.io/airplay-esp32/boards/) | SqueezeAMP, Esparagus Audio Brick, XIAO ESP32-C5, custom boards |
-| [Features](https://rbouteiller.github.io/airplay-esp32/features/bluetooth/) | Bluetooth, Ethernet, displays, buttons, AirPlay tuning |
-| [Reference](https://rbouteiller.github.io/airplay-esp32/reference/build-environments/) | Build environments, SPIFFS, OTA, architecture |
-| [Troubleshooting](https://rbouteiller.github.io/airplay-esp32/troubleshooting/) | No sound, no setup WiFi, dropouts, build errors |
+| Signal | ESP32-S3 GPIO | Direction (slave mode) |
+| --- | --- | --- |
+| BCK (bit clock) | 4 | in |
+| WS / LRCK (word select) | 5 | in |
+| DIN (serial data) | 6 | in |
+| MCLK | – (optional) | out, master mode only |
+| GND | GND | common ground is required |
 
-## Contributing
+Connect the S3's native USB port to the host. If your board has a separate UART USB
+port, use that one for flashing and logs.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and the
-[contributing guide](https://rbouteiller.github.io/airplay-esp32/contributing/).
-Documentation lives in [`docs/`](docs/) and is built with [Zensical](https://zensical.org/)
-— every page on the site has an edit link that takes you straight to the GitHub editor.
+## Build and flash
 
-## Acknowledgements
+PlatformIO:
 
-- [Shairport Sync](https://github.com/mikebrady/shairport-sync) — the reference AirPlay implementation
-- [openairplay/airplay2-receiver](https://github.com/openairplay/airplay2-receiver) — Python AirPlay 2 implementation
-- [Espressif](https://github.com/espressif) — ESP-IDF framework and codec libraries
+```bash
+git clone --recursive https://github.com/DRMx86/AirPlay-to-USB-Audio
+cd AirPlay-to-USB-Audio
+git checkout i2s-to-USB-Audio
+pio run -e esp32s3 -t upload
+pio run -e esp32s3 -t monitor
+```
+
+ESP-IDF (>= 5.5):
+
+```bash
+idf.py set-target esp32s3
+idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3" build
+idf.py -p <port> flash monitor
+```
+
+If you have built an earlier (AirPlay) version of this repository in the same checkout,
+delete the old `sdkconfig` and `managed_components/` first so the new configuration
+and dependency set are generated cleanly.
+
+## Configuration
+
+`idf.py menuconfig` → **I2S to USB Audio**:
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| I2S role | Slave | Slave: the source supplies BCK/WS. Master: the ESP32 supplies BCK/WS (and MCLK). |
+| Sample rate | 48 kHz | 44.1 kHz input is resampled to 48 kHz (uses more CPU). |
+| Slot width | 32-bit | Most ADCs/receivers use 32-bit slots. Audio is truncated to 16 bits. |
+| Format | Philips | Or MSB / left-justified. |
+| BCK / WS / DIN / MCLK GPIO | 4 / 5 / 6 / -1 | |
+| USB ring buffer | 60 ms | Absorbs jitter and clock drift. |
+| USB prefill | 20 ms | Audio buffered before streaming starts; sets the steady-state latency. |
+
+The USB side is fixed at 48 kHz, 16-bit, stereo (`CONFIG_UAC_SAMPLE_RATE` must equal
+`CONFIG_OUTPUT_SAMPLE_RATE_HZ`).
+
+## How it works
+
+- `main/audio/audio_input_i2s.c` — I2S RX channel plus a capture task. Reads 5 ms blocks,
+  converts to 16-bit, optionally resamples 44.1 → 48 kHz and pushes the result to the USB output.
+- `main/audio/audio_output_usb.c` — USB UAC device (via `espressif/usb_device_uac`) and a
+  ring buffer. The host pulls audio from the buffer in the UAC input callback.
+- `main/audio/audio_resample.c` — sinc resampler wrapper (`components/audio-resampler`).
+
+The serial log prints a status line every 5 seconds: whether I2S data is arriving, frames
+captured, USB buffer fill, and overrun/underrun counts.
+
+### Clock drift
+
+The I2S source and the USB host run from different clocks, so the buffer slowly fills or
+drains. When it is full the excess frames are dropped (an *overrun*); when it runs dry the
+host receives silence until the buffer refills to the prefill level (an *underrun*). With
+typical crystals this is a rare, brief glitch. If you hear regular clicks, make the I2S
+source and the USB host share a clock domain where possible, or enlarge the buffer. There
+is no asynchronous sample-rate conversion or UAC feedback endpoint yet.
+
+## Status
+
+This branch has not been run on hardware yet. The sources have been syntax-checked against
+stubs of the ESP-IDF APIs, but a full ESP-IDF build and an end-to-end listening test are
+still to do.
 
 ## Legal
 
 **Non-commercial use only.** Commercial use requires explicit permission — see [LICENSE](LICENSE).
-
-This is an independent project based on protocol analysis. Not affiliated with Apple Inc.
-Not guaranteed to work with future iOS or macOS versions. Provided as-is without warranty.
+Provided as-is without warranty.

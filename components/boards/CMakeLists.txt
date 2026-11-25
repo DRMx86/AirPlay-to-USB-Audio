@@ -10,7 +10,7 @@ if(CONFIG_BOARD_TARGET_PATH)
     set(boards_dir ${CONFIG_BOARD_TARGET_PATH})
 else()
     # Requirements scan phase - register with all dirs so headers are found
-    set(boards_dir "squeezeamp")
+    set(boards_dir "esp32s3-generic")
 endif()
 
 idf_component_register(

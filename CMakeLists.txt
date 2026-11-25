@@ -1,4 +1,4 @@
-# AirPlay 2 Receiver for ESP32
+# I2S -> USB audio bridge for ESP32-S3
 cmake_minimum_required(VERSION 3.16)
 
 # Read firmware version from version.txt
@@ -22,9 +22,3 @@ project(airplay2-receiver VERSION ${PROJECT_VER})
 
 include(cmake/fix_usb_device_uac_platformio.cmake)
 
-# Build a SPIFFS image from data/ and flash it alongside the firmware.
-# Partition label "storage" matches partitions.csv. Used by:
-#   - components/dac_tas57xx/ (HybridFlow DAC firmware)
-#   - components/display/     (ST7789 background image)
-# Flash firmware + SPIFFS together with: idf.py build flash
-spiffs_create_partition_image(storage "${CMAKE_SOURCE_DIR}/data" FLASH_IN_PROJECT)

@@ -4,127 +4,56 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ESP32 AirPlay 2 Receiver — firmware that turns ESP32/ESP32-S3/ESP32-P4 boards into AirPlay 2 speakers. Supports ALAC and AAC decoding, Bluetooth A2DP (ESP32 only), W5500 Ethernet (Esparagus Audio Brick), OLED/TFT displays, hardware buttons, and OTA updates.
+I2S-to-USB-Audio — firmware that turns an ESP32-S3 into a USB Audio Class (UAC) input device fed from an I2S input. Derived from the airplay-esp32 project; AirPlay, Bluetooth, WiFi/Ethernet, web UI, displays and buttons were removed on this branch.
 
 ## Build & Flash
 
-**PlatformIO** (recommended):
+**PlatformIO**:
 ```bash
-pio run -e <env> -t build          # Build firmware
-pio run -e <env> -t upload          # Build + flash via USB
-pio run -e <env> -t monitor         # Serial monitor (115200 baud)
-pio run -e <env> -t uploadfs        # Flash SPIFFS from data/
-pio run -e <env> -t menuconfig      # Kconfig configuration
+pio run -e esp32s3 -t build         # Build firmware
+pio run -e esp32s3 -t upload        # Build + flash
+pio run -e esp32s3 -t monitor       # Serial monitor (115200 baud)
+pio run -e esp32s3 -t menuconfig    # Kconfig configuration
 ```
 
-**ESP-IDF** (native):
+**ESP-IDF** (native, >= 5.5):
 ```bash
-source /path/to/esp-idf/export.sh
-idf.py set-target esp32s3           # or esp32, esp32p4
-idf.py build
-idf.py -p /dev/ttyUSB0 flash
-idf.py -p /dev/ttyUSB0 monitor
+idf.py set-target esp32s3
+idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3" build
+idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
-## Build Environments
-
-| Environment | Board | Notes |
-|---|---|---|
-| `esp32s3` | ESP32-S3 + external DAC (e.g. PCM5102A) | Default |
-| `esp32s3-jtag` | ESP32-S3 with JTAG | Extends esp32s3 |
-| `squeezeamp` | ESP32 + TAS5756 DAC/amp | 8MB flash |
-| `squeezeamp-bt` | Same + Bluetooth A2DP | |
-| `squeezeamp-4m` | SqueezeAMP with 4MB flash | |
-| `esparagus-audio-brick` | ESP32 + TAS5825M DAC/amp | |
-| `esparagus-audio-brick-bt` | Same + Bluetooth + Ethernet | |
-| `esparagus-audio-brick-s3` | ESP32-S3 + TAS5825M | |
-| `esparagus-louder` | ESP32 + TAS5825M + extra gain | |
-| `esparagus-louder-bt` | Louder + Bluetooth | |
-| `esparagus-louder-s3` | ESP32-S3 + Louder | |
-
-Sdkconfig defaults are layered via `cmake_extra_args` (left-to-right override). Custom board config: create `sdkconfig.user.<name>` + `user_platformio.ini` to extend any environment without modifying the main config.
+Build environments: `esp32s3` (default) and `esp32s3-jtag`. Sdkconfig defaults are layered via `cmake_extra_args` (left-to-right override). Custom config: create `user_platformio.ini` to extend an environment.
 
 ## Architecture
 
 ```
 main/
-├── main.c                  # Entry point — initializes NVS, WiFi, starts AirPlay services
-├── settings.c              # NVS persistence for device name, WiFi credentials, volume
-├── audio/                  # Audio pipeline
-│   ├── audio_receiver.c    # RTSP session manager — orchestrates streams (buffered/unbuffered)
-│   ├── audio_stream.c      # Base stream abstraction
-│   ├── audio_stream_buffered.c   # AirPlay 2 AAC (deep jitter buffer)
-│   ├── audio_stream_realtime.c     # AirPlay 1 ALAC (low latency UDP)
-│   ├── audio_decoder.c     # ALAC and AAC decoders
-│   ├── audio_buffer.c      # Frame buffering between receiver and output
-│   ├── audio_timing.c      # PTP-based timing — early/late frame handling
-│   ├── audio_resample.c    # Sample rate conversion (44.1→48kHz)
-│   ├── audio_output.c      # I2S output
-│   ├── audio_output_spdif.c # S/PDIF output
-│   ├── audio_output_usb.c  # USB audio output
-│   ├── audio_crypto.c      # AirPlay encryption
-│   ├── a2dp_sink.c         # Bluetooth A2DP sink
-│   └── eq_events.c         # EQ parameter changes (TAS58xx)
-├── rtsp/                   # RTSP protocol server
-│   ├── rtsp_server.c       # RTSP connection handler
-│   ├── rtsp_conn.c         # Connection management
-│   ├── rtsp_handlers.c     # RTSP method handlers (OPTIONS, SETUP, PLAY, etc.)
-│   ├── rtsp_events.c       # RTSP event handling (including BT passthrough)
-│   ├── rtsp_crypto.c       # RTSP-level encryption
-│   ├── rtsp_fairplay.c     # Apple FairPlay integration
-│   └── rtsp_rsa.c          # RSA crypto
-├── hap/                    # HomeKit Accessory Protocol
-│   ├── hap.c               # Core HAP
-│   ├── hap_pair_setup.c    # Pairing setup (SRP handshake)
-│   ├── hap_pair_verify.c   # Pair verify (Ed25519)
-│   ├── hap_crypto.c        # HAP encryption
-│   └── srp.c               # SRP-6a key exchange
-├── plist/                  # Apple Property List parsing
-├── network/                # Network stack
-│   ├── wifi.c              # WiFi AP+STA, captive portal, auto-reconnect
-│   ├── ethernet.c          # W5500 SPI Ethernet driver
-│   ├── mdns_airplay.c      # mDNS AirPlay service advertisement
-│   ├── ptp_clock.c         # Precision Time Protocol clock
-│   ├── ntp_clock.c         # NTP time sync fallback
-│   ├── web_server.c        # HTTP config/control server
-│   ├── ota.c               # OTA firmware updates
-│   ├── dns_server.c        # Captive portal DNS
-│   └── log_stream.c        # Remote log streaming
-├── dacp_client.c           # DACP (Digital Audio Control Protocol) — button/remote commands
-├── playback_control.c      # Unified playback control abstraction
-├── buttons.c               # Hardware button input with debounce + auto-repeat
-└── led.c                   # LED status indicator
+├── main.c                    # app_main: board init, USB output, I2S input, 5 s status log
+├── Kconfig.projbuild         # "I2S to USB Audio" menu (I2S role/rate/pins, USB buffer sizes)
+└── audio/
+    ├── audio_input_i2s.c/.h  # I2S RX channel + capture task (slave/master, 16/32-bit slots)
+    ├── audio_output_usb.c    # UAC device (espressif/usb_device_uac) + ring buffer
+    ├── audio_output.h        # USB output API: init / write / flush / stats
+    └── audio_resample.c/.h   # sinc resampler wrapper (44.1 -> 48 kHz when configured)
 
 components/
-├── dac/                    # Abstract DAC API (Kconfig-selected implementation)
-│   └── dac.c               # Dispatch layer → TAS57xx or TAS58xx driver
-├── dac_tas57xx/            # TI TAS57xx (TAS5756/5754/5751) DAC driver with hybrid flow DSP
-├── dac_tas58xx/            # TI TAS58xx (TAS5825M) DAC driver with on-chip DSP + 15-band EQ
-├── display/                # Display drivers
-│   ├── display.c           # Common display API
-│   ├── display_st7789.c    # ST7789 TFT with LVGL 9 rendering (ESP32-S3)
-│   └── display_stub.c      # No-op stub when display disabled
-├── boards/                 # Board support (HAL)
-│   ├── board_common.c      # Shared board utilities
-│   ├── esp32-generic/      # ESP32 generic board init
-│   ├── esp32s3-generic/    # ESP32-S3 generic board init
-│   ├── waveshare-esp32p4/  # Waveshare ESP32-P4 board init
-│   ├── squeezeamp/         # SqueezeAMP (ESP32 + TAS5756)
-│   └── esparagus-audio-brick/ # Esparagus Audio Brick (ESP32 + TAS5825M + W5500)
-├── spiffs_storage/         # SPIFFS filesystem mount (stores web pages + DSP configs)
-├── audio-resampler/        # sinc-based audio resampler (44.1→48kHz)
-└── board_utils/            # Board-level utilities
+├── boards/                   # Board support (esp32-generic, esp32s2/s3-generic, waveshare-esp32p4)
+├── audio-resampler/          # sinc-based audio resampler
+├── dac*/                     # DAC drivers, unused by this firmware (kept from the upstream project)
+├── display/, u8g2*/          # unused; only the stub is built (display Kconfig menu was removed)
+├── spiffs_storage/           # unused
+└── board_utils/
 ```
 
 ## Key Conventions
 
-- **CMake/Kconfig**: Board selection is via `CONFIG_` Kconfig options. DAC driver is auto-selected (`CONFIG_DAC_TAS57XX` or `CONFIG_DAC_TAS58XX`). Display, buttons, BT, Ethernet are all Kconfig-gated.
+- **Data path**: I2S RX (DMA) -> capture task (`i2s_capture`, core 1, prio 7) -> `audio_output_write()` -> byte ring buffer -> `usb_input_cb()` (called by the UAC stack) -> USB host.
+- **Format**: the USB stream is always 16-bit stereo at `CONFIG_OUTPUT_SAMPLE_RATE_HZ` (must equal `CONFIG_UAC_SAMPLE_RATE`). 32-bit I2S slots are truncated to the top 16 bits.
+- **Drift handling**: `audio_output_write()` never blocks; when the ring buffer is full the excess frames are dropped (overrun). On underrun the USB callback sends silence and waits for `CONFIG_USB_AUDIO_PRIME_MS` of audio before resuming.
 - **Component structure**: Each component has its own `CMakeLists.txt` with `idf_component_register()`.
-- **Git submodules**: `u8g2` (OLED graphics) and `u8g2-hal-esp-idf` (ESP-IDF HAL for u8g2) are submodules — always clone with `--recursive`.
-- **SPIFFS**: `data/` directory contents are flashed to SPIFFS. `data/www/` = web UI, `data/hf/` = hybrid flow DSP binaries for TAS57xx.
-- **Audio pipeline**: AudioReceiver (rtsp) → decoder → AudioBuffer → AudioOutput (I2S/SPDIF/USB). Buffered streams (AAC) use deep jitter buffer; realtime streams (ALAC) use low-latency UDP with early/late timing thresholds.
-- **AirPlay/Bluetooth coexistence**: Mutually exclusive at runtime. BT connection suspends AirPlay; disconnect resumes it.
-- **Eth/WiFi failover**: Ethernet preferred at boot; WiFi fallback if no cable. Hot-swap at runtime.
+- **Git submodules**: `u8g2` and `u8g2-hal-esp-idf` are still declared as submodules — clone with `--recursive`.
+- **Project name**: the CMake project is still called `airplay2-receiver` so existing local scripts that reference `build/airplay2-receiver.bin` keep working.
 
 ## Code Quality
 
@@ -139,7 +68,7 @@ components/
 **CI** (`.github/workflows/ci-release.yml`): On push/PR to `main`:
 - `format-check`: clang-format dry-run on all C/H files (excludes `components/u8g2`)
 - `lint-check`: clang-tidy on build output (requires ESP-IDF v5.5 toolchain)
-- `build`: compiles 4 target configs (esp32s3, squeezeamp-bt, squeezeamp-4m, esparagus-audio-brick-bt)
+- `build`: compiles the esp32s3 target config
 - `release`: auto-creates GitHub release with merged firmware bins (only on push)
 
 **Local tooling** (in `scripts/`):
