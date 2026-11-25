@@ -1,7 +1,7 @@
 set(SRC_FILES
     "main.c"
     "audio/audio_input_i2s.c"
-    "audio/audio_output_usb.c"
+    "audio/audio_output_usb_host.c"
     "audio/audio_resample.c"
 )
 
@@ -18,6 +18,7 @@ set(DEPS
     esp_timer
     boards
     audio-resampler
+    usb
 )
 
 idf_component_register(

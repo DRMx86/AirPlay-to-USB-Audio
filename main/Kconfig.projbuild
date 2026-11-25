@@ -1,4 +1,4 @@
-menu "I2S to USB Audio"
+menu "I2S to USB DAC Audio"
     # Board / pin configuration lives in components/boards/Kconfig.projbuild.
 
     menu "I2S Input"
@@ -27,9 +27,9 @@ menu "I2S to USB Audio"
             default I2S_IN_RATE_48000
             help
                 Sample rate of the I2S stream coming in. In slave mode this must
-                match what the source actually sends. 48 kHz needs no resampling
-                because the USB side runs at 48 kHz. 44.1 kHz is upsampled to
-                48 kHz on the fly (costs CPU).
+                match what the source actually sends. 48 kHz needs no resampling when the USB DAC
+                rate is 48 kHz. 44.1 kHz is upsampled to 48 kHz on the fly
+                (costs CPU).
 
             config I2S_IN_RATE_48000
                 bool "48000 Hz (no resampling)"
@@ -106,15 +106,15 @@ menu "I2S to USB Audio"
 
     endmenu
 
-    menu "USB Audio Output"
+    menu "USB DAC Output"
 
         config OUTPUT_SAMPLE_RATE_HZ
-            int "USB audio sample rate (must equal UAC_SAMPLE_RATE)"
+            int "USB DAC sample rate"
             default 48000
             help
-                Sample rate presented to the USB host. This must match
-                CONFIG_UAC_SAMPLE_RATE of the usb_device_uac component
-                (sdkconfig.defaults.esp32s3 sets both to 48000).
+                Sample rate sent to the USB DAC dongle (16-bit stereo). The
+                dongle must support it; 44100 and 48000 work on nearly all.
+                If it differs from the I2S input rate, audio is resampled.
 
         config USB_AUDIO_BUFFER_MS
             int "USB ring buffer size (ms)"
@@ -122,8 +122,8 @@ menu "I2S to USB Audio"
             range 20 500
             help
                 Size of the buffer between the I2S capture task and the USB
-                isochronous endpoint. It absorbs scheduling jitter and the slow
-                clock drift between the I2S source and the USB host. Larger
+                DAC writer task. It absorbs scheduling jitter and the slow
+                clock drift between the I2S source and the USB DAC. Larger
                 values tolerate more jitter but add latency.
 
         config USB_AUDIO_PRIME_MS
@@ -131,8 +131,8 @@ menu "I2S to USB Audio"
             default 20
             range 5 250
             help
-                Amount of audio that must be buffered before data is handed to
-                the USB host (after start-up or after an underrun). Must be
+                Amount of audio that must be buffered before data is sent to
+                the USB DAC (after start-up or after an underrun). Must be
                 smaller than the buffer size. This is roughly the steady-state
                 latency added by the buffer.
 
