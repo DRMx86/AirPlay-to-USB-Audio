@@ -1,0 +1,38 @@
+name: I2S to USB DAC - Build
+
+on:
+  push:
+    branches: [i2s-to-USB-Audio]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build (ESP-IDF, ESP32-S3)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.2
+          target: esp32s3
+          path: .
+          command: idf.py build merge-bin
+
+      - name: Collect firmware
+        run: |
+          mkdir -p firmware
+          cp build/merged-binary.bin firmware/ || true
+          cp build/bootloader/bootloader.bin firmware/
+          cp build/partition_table/partition-table.bin firmware/
+          cp build/*.bin firmware/ 2>/dev/null || true
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32s3-i2s-to-usb-dac-firmware
+          path: firmware/
