@@ -1,4 +1,4 @@
-# I2S -> USB audio bridge for ESP32-S3
+# I2S -> USB DAC (USB host) audio bridge for ESP32-S3
 cmake_minimum_required(VERSION 3.16)
 
 # Read firmware version from version.txt
@@ -13,12 +13,8 @@ if(IDF_VERSION_MAJOR LESS 5 OR (IDF_VERSION_MAJOR EQUAL 5 AND IDF_VERSION_MINOR 
     message(WARNING
         "ESP-IDF ${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}.${IDF_VERSION_PATCH} detected. "
         "This project is developed and tested against ESP-IDF >= 5.5. "
-        "Older versions may require workarounds (e.g. for hosted-WiFi Kconfig symbols on ESP32-P4). "
         "Please upgrade with: cd $ENV{IDF_PATH} && git fetch && git checkout v5.5.2 && ./install.sh")
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(airplay2-receiver VERSION ${PROJECT_VER})
-
-include(cmake/fix_usb_device_uac_platformio.cmake)
-
