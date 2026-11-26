@@ -112,17 +112,20 @@ menu "I2S to USB DAC Audio"
             int "USB DAC sample rate"
             default 48000
             help
-                Sample rate sent to the USB DAC dongle (16-bit stereo). The
-                dongle must support it; 44100 and 48000 work on nearly all.
-                If it differs from the I2S input rate, audio is resampled.
+                Sample rate sent to the USB DAC dongle (stereo, 16-bit
+                internally; expanded to 24/32-bit if the dongle needs it).
+                Works with UAC 1.0 and UAC 2.0 dongles. The dongle must
+                support the rate; 44100 and 48000 work on nearly all.
+                Only 44.1 -> 48 kHz conversion is built in, so keep this equal
+                to the I2S input rate, or use 44.1 kHz in and 48 kHz out.
 
         config USB_AUDIO_BUFFER_MS
-            int "USB ring buffer size (ms)"
+            int "USB FIFO size (ms)"
             default 60
             range 20 500
             help
-                Size of the buffer between the I2S capture task and the USB
-                DAC writer task. It absorbs scheduling jitter and the slow
+                Size of the FIFO between the I2S capture task and the USB
+                isochronous transfers to the DAC. It absorbs scheduling jitter and the slow
                 clock drift between the I2S source and the USB DAC. Larger
                 values tolerate more jitter but add latency.
 
@@ -135,6 +138,16 @@ menu "I2S to USB DAC Audio"
                 the USB DAC (after start-up or after an underrun). Must be
                 smaller than the buffer size. This is roughly the steady-state
                 latency added by the buffer.
+
+        config USB_HOST_VBUS_EN_GPIO
+            int "USB host VBUS enable GPIO (-1 = none)"
+            default -1
+            range -1 48
+            help
+                GPIO driven HIGH at start-up to switch 5 V onto the USB host
+                port's VBUS (e.g. a load switch). Leave at -1 if the board
+                already supplies 5 V to the native USB port VBUS. The DAC
+                dongle needs 5 V on VBUS to power up.
 
     endmenu
 

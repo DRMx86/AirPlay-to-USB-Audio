@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-I2S-to-USB-Audio — firmware that turns an ESP32-S3 into a USB Audio Class (UAC) input device fed from an I2S input. Derived from the airplay-esp32 project; AirPlay, Bluetooth, WiFi/Ethernet, web UI, displays and buttons were removed on this branch.
+I2S-to-USB-DAC — firmware that takes an I2S input (e.g. from a Bluetooth audio board) and plays it on a USB DAC dongle. The ESP32-S3 is the USB **host** (native USB port); UAC 1.0 and UAC 2.0 dongles are supported. Derived from the airplay-esp32 project; on `main` the source is AirPlay, here it is I2S, and AirPlay, Bluetooth, WiFi/Ethernet, web UI, displays and buttons were removed.
 
 ## Build & Flash
 
@@ -29,12 +29,12 @@ Build environments: `esp32s3` (default) and `esp32s3-jtag`. Sdkconfig defaults a
 
 ```
 main/
-├── main.c                    # app_main: board init, USB output, I2S input, 5 s status log
-├── Kconfig.projbuild         # "I2S to USB Audio" menu (I2S role/rate/pins, USB buffer sizes)
+├── main.c                    # app_main: board init, USB host output, I2S input, 5 s status log
+├── Kconfig.projbuild         # "I2S to USB DAC Audio" menu (I2S role/rate/pins, USB DAC rate, FIFO sizes, VBUS GPIO)
 └── audio/
     ├── audio_input_i2s.c/.h  # I2S RX channel + capture task (slave/master, 16/32-bit slots)
-    ├── audio_output_usb.c    # UAC device (espressif/usb_device_uac) + ring buffer
-    ├── audio_output.h        # USB output API: init / write / flush / stats
+    ├── audio_output_usb_host.c # native USB host UAC 1.0/2.0 streamer (descriptor parse, clock/rate setup, iso OUT)
+    ├── audio_output.h        # output API: init / write / flush / stats
     └── audio_resample.c/.h   # sinc resampler wrapper (44.1 -> 48 kHz when configured)
 
 components/
@@ -48,9 +48,11 @@ components/
 
 ## Key Conventions
 
-- **Data path**: I2S RX (DMA) -> capture task (`i2s_capture`, core 1, prio 7) -> `audio_output_write()` -> byte ring buffer -> `usb_input_cb()` (called by the UAC stack) -> USB host.
-- **Format**: the USB stream is always 16-bit stereo at `CONFIG_OUTPUT_SAMPLE_RATE_HZ` (must equal `CONFIG_UAC_SAMPLE_RATE`). 32-bit I2S slots are truncated to the top 16 bits.
-- **Drift handling**: `audio_output_write()` never blocks; when the ring buffer is full the excess frames are dropped (overrun). On underrun the USB callback sends silence and waits for `CONFIG_USB_AUDIO_PRIME_MS` of audio before resuming.
+- **Data path**: I2S RX (DMA) -> capture task (`i2s_capture`, core 1, prio 7) -> `audio_output_write()` -> stream-buffer FIFO -> isochronous OUT transfer callbacks (USB client task, core 0) -> USB DAC dongle.
+- **Format**: the FIFO is always 16-bit stereo at `CONFIG_OUTPUT_SAMPLE_RATE_HZ`; it is expanded to 24/32-bit in the iso callback if the dongle only offers wider slots. 32-bit I2S slots are truncated to the top 16 bits. Only 44.1 -> 48 kHz resampling exists, so I2S rate and USB rate must be equal or 44.1 in / 48 out.
+- **Drift handling**: `audio_output_write()` never blocks; when the FIFO is full the excess frames are dropped (overrun). On underrun the iso callback sends silence and waits for `CONFIG_USB_AUDIO_PRIME_MS` of audio before resuming.
+- **USB host**: ESP32-S3 USB is full-speed only. The native USB port is taken over by the host, so flash/monitor via the UART port. UAC 2.0: rate set on every Clock Source entity before selecting the alt; UAC 1.0: rate set on the endpoint after SET_INTERFACE. `usb_host_interface_claim()` does not send SET_INTERFACE; the explicit control transfer is required.
+- **Host-side tests**: the descriptor parser and packet sizing can be tested on a PC by `#include`-ing `audio_output_usb_host.c` into a test with stubbed FreeRTOS/USB calls (real `usb/*.h` headers from ESP-IDF).
 - **Component structure**: Each component has its own `CMakeLists.txt` with `idf_component_register()`.
 - **Git submodules**: `u8g2` and `u8g2-hal-esp-idf` are still declared as submodules — clone with `--recursive`.
 - **Project name**: the CMake project is still called `airplay2-receiver` so existing local scripts that reference `build/airplay2-receiver.bin` keep working.

@@ -4,13 +4,11 @@ CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 CONFIG_SPIRAM_MODE_OCT=y
 
-# USB Audio Class defaults for the usb_device_uac integration.
-# Keep both streams stereo at 48 kHz.  CONFIG_OUTPUT_SAMPLE_RATE_HZ (main
-# component) must equal CONFIG_UAC_SAMPLE_RATE.
-CONFIG_UAC_SPEAKER_CHANNEL_NUM=2
-CONFIG_UAC_MIC_CHANNEL_NUM=2
-CONFIG_UAC_SAMPLE_RATE=48000
+# USB DAC output (ESP32-S3 is the USB host; UAC 1.0 and 2.0 dongles).
+# Must equal the I2S input rate, or use 44.1 kHz in / 48 kHz out.
 CONFIG_OUTPUT_SAMPLE_RATE_HZ=48000
+# GPIO that enables 5 V on the USB host VBUS, -1 if the board powers it itself.
+CONFIG_USB_HOST_VBUS_EN_GPIO=-1
 
 # I2S input (see main/Kconfig.projbuild for all options)
 #   Slave mode: the external source drives BCK and WS.

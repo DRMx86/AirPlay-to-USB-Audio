@@ -27,11 +27,12 @@ static void log_stats(uint32_t *last_frames) {
   *last_frames = in.frames_captured;
 
   ESP_LOGI(TAG,
-           "I2S: %s, %lu frames/%ds, %lu empty reads | USB: %s, buffer "
+           "I2S: %s, %lu frames/%ds, %lu empty reads | USB DAC: %s, buffer "
            "%lu%%, overruns %lu, underruns %lu",
            in.active ? "active" : "idle", (unsigned long)delta,
            STATS_PERIOD_MS / 1000, (unsigned long)in.read_timeouts,
-           out.streaming ? "streaming" : "priming",
+           !out.connected ? "not connected"
+                          : (out.streaming ? "streaming" : "priming"),
            (unsigned long)(out.capacity_bytes
                                ? out.fill_bytes * 100 / out.capacity_bytes
                                : 0),
@@ -39,7 +40,7 @@ static void log_stats(uint32_t *last_frames) {
 }
 
 void app_main(void) {
-  ESP_LOGI(TAG, "I2S -> USB audio bridge, board: %s", iot_board_get_info());
+  ESP_LOGI(TAG, "I2S -> USB DAC bridge, board: %s", iot_board_get_info());
 
   esp_err_t err = iot_board_init();
   if (err != ESP_OK) {
