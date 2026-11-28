@@ -79,7 +79,8 @@ This repository commits a generated `sdkconfig`, and it takes precedence over th
 component manager complains, delete `managed_components/` (and `dependencies.lock`).
 
 **Credentials and CI builds:** the Wi-Fi name and password are compiled into the firmware. The
-GitHub Actions workflow builds from the committed `sdkconfig`, so a CI-built image has no Wi-Fi
+GitHub Actions workflow for this branch (`.github/workflows/webradio-usb-dac-build.yml`, artifact
+`webradio-usb-dac-esp32s3-firmware`) builds from the committed `sdkconfig`, so a CI-built image has no Wi-Fi
 credentials unless you commit them, which you should not do in a public repository. Build and
 flash locally with your own settings instead.
 

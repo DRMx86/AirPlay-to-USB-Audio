@@ -1,0 +1,73 @@
+name: Web Radio to USB DAC - Build
+
+# Build for the webradio-to-USB-Audio branch only. Kept separate from the other
+# workflows (main's CI/release builds and the i2s-to-USB-Audio build) so runs
+# and artifacts from different branches are easy to tell apart.
+on:
+  push:
+    branches: [webradio-to-USB-Audio]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: webradio-usb-dac-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build web radio firmware (esp32s3)
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.5.2
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build with idf.py
+        shell: bash
+        run: |
+          git config --global --add safe.directory '*'
+          . "$IDF_PATH/export.sh"
+          export IDF_TARGET=esp32s3
+          # Keep the committed dependencies.lock (LVGL 9.5.0): without this the
+          # component manager re-solves and fails with
+          # "MissingKconfigError: LV_USE_FREETYPE".
+          export IDF_COMPONENT_CHECK_NEW_VERSION=0
+          if [ -f sdkconfig ]; then echo ">> using committed sdkconfig"; else echo ">> no sdkconfig, using defaults"; fi
+          idf.py build
+          echo ">> Web radio / USB audio settings used by this build:"
+          grep -nE "^CONFIG_(RADIO_|OUTPUT_SAMPLE|USB_AUDIO_)" sdkconfig || true
+          if ! grep -qE '^CONFIG_RADIO_WIFI_SSID="[^"]+"' sdkconfig; then
+            echo "::warning::No Wi-Fi SSID in sdkconfig: this image cannot join a network. Set it in menuconfig and build locally."
+          fi
+          # One image flashable at 0x0.
+          idf.py merge-bin
+          ls -la build/*.bin
+
+      - name: Collect firmware
+        shell: bash
+        run: |
+          mkdir -p firmware
+          cp build/merged-binary.bin firmware/webradio-usb-dac-esp32s3-merged.bin
+          for f in \
+            build/bootloader/bootloader.bin \
+            build/partition_table/partition-table.bin \
+            build/ota_data_initial.bin \
+            build/airplay2-receiver.bin \
+            sdkconfig \
+            dependencies.lock; do
+            if [ -f "$f" ]; then cp "$f" firmware/; else echo "missing: $f"; fi
+          done
+          ls -la firmware
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: webradio-usb-dac-esp32s3-firmware
+          path: firmware/
+          if-no-files-found: error
