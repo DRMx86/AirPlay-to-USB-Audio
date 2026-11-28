@@ -110,8 +110,20 @@ menu "Web Radio to USB DAC Audio"
                 before any audio is sent. Keep it low: a speaker that was left
                 loud (or a DAC that defaults to maximum) must never blast.
                 0 starts muted. The volume can then be changed from the web
-                page, or with the speaker's own controls if it has them.
-                The percentage covers the top 60 dB of the DAC's volume range.
+                page. It is never saved: every restart starts at this level.
+                The percentage covers a 40 dB digital range (or the top 60 dB
+                of the DAC's own range when the DAC volume option is on).
+
+        config USB_AUDIO_DEVICE_VOLUME
+            bool "Use the USB DAC's own volume control"
+            default n
+            help
+                Off (default): the volume slider on the web page always works
+                as a digital gain inside the ESP32, and the DAC's own volume
+                is fixed at 0 dB. This works with every speaker/dongle,
+                including ones (e.g. JBL speakers) that ignore or do not
+                expose a USB volume control.
+                On: use the DAC's Feature Unit volume when it has one.
 
         config USB_HOST_VBUS_EN_GPIO
             int "USB host VBUS enable GPIO (-1 = none)"

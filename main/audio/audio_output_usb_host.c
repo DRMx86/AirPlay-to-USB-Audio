@@ -472,6 +472,9 @@ static esp_err_t uac_fu_set_mute(uint8_t fu_id, bool mute) {
  * leave most of a slider silent).  Devices without a Feature Unit volume get
  * the same curve as a digital gain on the PCM instead. */
 #define VOLUME_RANGE_DB 60
+/* Digital-gain range.  Smaller than the device range so that the low end of the
+ * slider is still audible and not buried in 16-bit quantisation noise. */
+#define SW_VOLUME_RANGE_DB 40
 
 typedef struct {
   uint8_t id;
@@ -571,6 +574,36 @@ static void volume_apply_hw(void) {
   }
 }
 
+/* 0 dB (unity) snapped to the device's step size and range. */
+static int16_t unity_value(const fu_vol_t *f) {
+  int v = f->min + ((0 - f->min + f->res / 2) / f->res) * f->res;
+  if (v > f->max) {
+    v = f->max;
+  }
+  if (v < f->min) {
+    v = f->min;
+  }
+  return (int16_t)v;
+}
+
+/* When the web page controls the volume digitally, leave the DAC's own volume
+ * at a fixed, known level (0 dB) and unmuted, so it can neither swallow the
+ * slider nor add its own attenuation/gain on top of it. */
+static void volume_pin_hw_unity(void) {
+  for (int i = 0; i < s_fu_count; i++) {
+    const fu_vol_t *f = &s_fu_vol[i];
+    if (f->mode == 1) {
+      uac_fu_set_volume(f->id, 0, unity_value(f));
+    } else if (f->mode == 2) {
+      uac_fu_set_volume(f->id, 1, unity_value(f));
+      uac_fu_set_volume(f->id, 2, unity_value(f));
+    }
+  }
+  for (int i = 0; i < s_fu_count; i++) {
+    uac_fu_set_mute(s_fu_ids[i], false);
+  }
+}
+
 /* Digital gain used when the device has no volume control of its own. */
 static void volume_update_sw_gain(void) {
   int pct = s_volume_pct;
@@ -579,7 +612,7 @@ static void volume_update_sw_gain(void) {
   } else if (pct <= 0) {
     s_sw_gain_q15 = 0;
   } else {
-    float db = -(float)VOLUME_RANGE_DB * (float)(100 - pct) / 100.0f;
+    float db = -(float)SW_VOLUME_RANGE_DB * (float)(100 - pct) / 100.0f;
     s_sw_gain_q15 = (int32_t)(32768.0f * powf(10.0f, db / 20.0f));
   }
 }
@@ -662,6 +695,7 @@ static void setup_device(uint8_t addr) {
    * on most devices.)  Missing mute/volume controls are normal and only
    * logged. */
   s_hw_volume = false;
+  bool fu_found = false;
   for (int i = 0; i < s_fu_count; i++) {
     fu_vol_t *f = &s_fu_vol[i];
     memset(f, 0, sizeof(*f));
@@ -678,7 +712,7 @@ static void setup_device(uint8_t addr) {
       f->min = mn;
       f->max = mx;
       f->res = rs;
-      s_hw_volume = true;
+      fu_found = true;
       char a[12];
       char b[12];
       char c[12];
@@ -691,8 +725,17 @@ static void setup_device(uint8_t addr) {
       ESP_LOGI(TAG, "FU %u has no volume control", f->id);
     }
   }
+#ifdef CONFIG_USB_AUDIO_DEVICE_VOLUME
+  s_hw_volume = fu_found; /* use the DAC's own volume control */
+#else
+  s_hw_volume = false; /* always use digital gain; pin the DAC at 0 dB */
+#endif
   volume_update_sw_gain();
-  volume_apply_hw();
+  if (s_hw_volume) {
+    volume_apply_hw();
+  } else if (fu_found) {
+    volume_pin_hw_unity();
+  }
   ESP_LOGI(TAG, "Volume %d%% (%s)", (int)s_volume_pct,
            s_hw_volume ? "device volume" : "digital gain");
 
