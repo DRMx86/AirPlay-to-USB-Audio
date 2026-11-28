@@ -13,17 +13,19 @@
   --warn:#fbbf24;--err:#f87171;--r:14px;color-scheme:dark
 }
 *{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--text);min-height:100vh;
+html{-webkit-text-size-adjust:100%;touch-action:manipulation}
+body{margin:0;background:var(--bg);color:var(--text);min-height:100vh;min-height:100dvh;
   font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
-  -webkit-font-smoothing:antialiased}
-main{max-width:440px;margin:0 auto;padding:max(24px,env(safe-area-inset-top)) 16px 48px}
+  -webkit-font-smoothing:antialiased;touch-action:manipulation}
+main{max-width:440px;margin:0 auto;
+  padding:max(24px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left))}
 [hidden]{display:none!important}
 header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:24px}
-.brand{display:flex;align-items:center;gap:10px}
-.brand svg{width:26px;height:26px;color:var(--accent)}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand svg{width:26px;height:26px;color:var(--accent);flex:none}
 h1{font-size:21px;font-weight:650;letter-spacing:-.01em;margin:0}
 h2{font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0}
+.hright{display:flex;align-items:center;gap:8px}
 .pill{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);
   border:1px solid var(--line);border-radius:999px;padding:5px 12px 5px 10px;white-space:nowrap}
 .pill i{width:8px;height:8px;border-radius:50%;background:var(--muted)}
@@ -31,12 +33,26 @@ h2{font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
 .pill.setup i{background:var(--warn)}
 .pill.wait i{background:var(--warn);animation:pulse 1.2s ease-in-out infinite}
 @keyframes pulse{50%{opacity:.25}}
+
+/* two columns when the window is wide: iPad, iPhone landscape, Mac Safari */
+.cols{display:grid;grid-template-columns:minmax(0,1fr);column-gap:20px;align-items:start}
+@media (min-width:700px){
+  main{max-width:1040px}
+  .cols{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+}
+@media (max-height:520px){
+  main{padding-top:max(14px,env(safe-area-inset-top))}
+  header{margin-bottom:14px}
+  .card{padding:12px;margin-bottom:14px}
+}
+
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:20px}
 .head{display:flex;align-items:center;justify-content:space-between;margin:0 2px 10px;min-height:32px}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;margin:0 0 14px;font-size:15px}
 .kv dt{color:var(--muted)}
 .kv dd{margin:0;text-align:right;overflow-wrap:anywhere}
-button{font:inherit;color:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .btn{display:inline-flex;align-items:center;justify-content:center;height:44px;padding:0 18px;
   border-radius:10px;border:1px solid transparent;font-weight:600;background:var(--accent);color:var(--ink)}
@@ -54,7 +70,9 @@ li+li{border-top:1px solid var(--line)}
 .row:hover{background:var(--hover)}
 .row .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .row .tag{font-size:12px;color:var(--accent)}
+.row .tag.dim{color:var(--muted)}
 .row svg{width:18px;height:18px;flex:none;color:var(--muted)}
+.row.cur{background:rgba(94,234,212,.06)}
 .pw{display:flex;flex-direction:column;gap:10px;padding:2px 16px 16px}
 .field{display:flex;gap:8px}
 input[type=text],input[type=password]{flex:1;min-width:0;height:44px;padding:0 12px;border-radius:10px;
@@ -62,19 +80,39 @@ input[type=text],input[type=password]{flex:1;min-width:0;height:44px;padding:0 1
 input::placeholder{color:#5d6773}
 .note{font-size:14px;color:var(--muted);margin:10px 2px 0}
 .err{color:var(--err)}
+
+/* now playing */
+.np .top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.npstate{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);
+  display:flex;align-items:center;gap:8px}
+.npstate.play{color:var(--accent)}
+.npstate.wait{color:var(--warn)}
+.npname{font-size:20px;font-weight:650;letter-spacing:-.01em;margin:0;overflow-wrap:anywhere}
+.nptitle{font-size:15px;color:var(--muted);margin:4px 0 14px;min-height:22px;overflow-wrap:anywhere}
+.bars{display:inline-flex;gap:2px;align-items:flex-end;height:14px}
+.bars b{width:3px;background:var(--accent);border-radius:1px;animation:eq .9s ease-in-out infinite}
+.bars b:nth-child(2){animation-delay:.2s}.bars b:nth-child(3){animation-delay:.4s}
+@keyframes eq{0%,100%{height:4px}50%{height:14px}}
+
+/* volume */
 .vol{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
 .volrow{display:flex;align-items:center;gap:12px}
-.volrow .ghost{flex:none;width:40px;height:40px;padding:0;font-size:22px;line-height:1}
+.volrow .ghost{flex:none;width:44px;height:44px;padding:0;font-size:22px;line-height:1;border-radius:10px}
+.volx{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.volx .ghost{height:38px;align-self:flex-start}
+.chk{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--muted);cursor:pointer}
+.chk input{width:20px;height:20px;accent-color:var(--accent);margin:0;flex:none}
 output{font-variant-numeric:tabular-nums;font-weight:600}
-input[type=range]{-webkit-appearance:none;appearance:none;flex:1;min-width:0;width:100%;height:28px;background:none;margin:0}
+input[type=range]{-webkit-appearance:none;appearance:none;flex:1;min-width:0;width:100%;height:32px;background:none;margin:0}
 input[type=range]{--p:0%}
 input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;
   background:linear-gradient(to right,var(--accent) var(--p),var(--line) var(--p))}
 input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:var(--line)}
 input[type=range]::-moz-range-progress{height:6px;border-radius:3px;background:var(--accent)}
-input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;border-radius:50%;
-  background:var(--accent);border:0;margin-top:-9px}
-input[type=range]::-moz-range-thumb{width:24px;height:24px;border-radius:50%;background:var(--accent);border:0}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;
+  background:var(--accent);border:0;margin-top:-10px}
+input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;background:var(--accent);border:0}
+
 .center{text-align:center;padding:28px 16px}
 .center h3{margin:16px 0 4px;font-size:18px}
 .center p{margin:0 0 20px;color:var(--muted);overflow-wrap:anywhere}
@@ -84,22 +122,20 @@ input[type=range]::-moz-range-thumb{width:24px;height:24px;border-radius:50%;bac
 .mark{width:44px;height:44px;margin:0 auto;border-radius:50%;display:grid;place-items:center;font-size:22px}
 .mark.ok{background:rgba(94,234,212,.12);color:var(--accent)}
 .mark.bad{background:rgba(248,113,113,.12);color:var(--err)}
-.hright{display:flex;align-items:center;gap:8px}
-.now{font-size:14px;color:var(--muted);margin:0 2px 10px;min-height:20px;overflow-wrap:anywhere}
-.row .tag.dim{color:var(--muted)}
-.bars{display:inline-flex;gap:2px;align-items:flex-end;height:14px}
-.bars b{width:3px;background:var(--accent);border-radius:1px;animation:eq 0.9s ease-in-out infinite}
-.bars b:nth-child(2){animation-delay:.2s}.bars b:nth-child(3){animation-delay:.4s}
-@keyframes eq{0%,100%{height:4px}50%{height:14px}}
+
+/* console */
 .consolebar{display:flex;align-items:center;gap:8px;margin-bottom:10px}
 .consolebar h2{flex:1}
 #logbox{background:#07090b;border:1px solid var(--line);border-radius:10px;padding:10px;
-  height:calc(100vh - 190px);min-height:280px;overflow:auto;
-  font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#cbd5e1;word-break:break-all}
+  height:calc(100vh - 190px);height:calc(100dvh - 190px);min-height:200px;overflow:auto;
+  font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#cbd5e1;word-break:break-all;
+  -webkit-overflow-scrolling:touch}
+#logbox:empty::before{content:attr(data-hint);color:var(--muted);font-family:system-ui,sans-serif;font-size:14px}
 #logbox div{white-space:pre-wrap}
 #logbox .e{color:var(--err)}#logbox .w{color:var(--warn)}#logbox .i{color:#9be7c4}
-@media (prefers-reduced-motion:reduce){.bars b{animation:none;height:10px}}
-@media (prefers-reduced-motion:reduce){.spin,.pill.wait i{animation:none}}
+@media (max-height:520px){#logbox{height:calc(100dvh - 120px)}}
+
+@media (prefers-reduced-motion:reduce){.spin,.pill.wait i{animation:none}.bars b{animation:none;height:10px}}
 </style>
 </head>
 <body>
@@ -116,54 +152,69 @@ input[type=range]::-moz-range-thumb{width:24px;height:24px;border-radius:50%;bac
   </header>
 
   <div id="mainview">
+    <div class="cols">
+      <div class="col">
+        <section id="np" class="card np" aria-live="polite">
+          <div class="top"><h2>Now playing</h2><span id="npstate" class="npstate"></span></div>
+          <p id="npname" class="npname">-</p>
+          <p id="nptitle" class="nptitle"></p>
+          <button id="playbtn" class="btn danger block" type="button">Stop</button>
+        </section>
 
-  <section id="now" class="card" hidden>
-    <dl class="kv">
-      <dt>Network</dt><dd id="k-ssid">-</dd>
-      <dt>Address</dt><dd id="k-ip">-</dd>
-      <dt>Signal</dt><dd id="k-sig">-</dd>
-    </dl>
-    <button id="forget" class="btn danger block" type="button">Forget this network</button>
-  </section>
+        <section id="vol" class="card">
+          <div class="vol"><h2>Volume</h2><output id="volv" for="volr">0%</output></div>
+          <div class="volrow">
+            <button id="vold" class="ghost" type="button" aria-label="Volume down">&minus;</button>
+            <input id="volr" type="range" min="0" max="100" step="1" value="0" aria-label="Volume">
+            <button id="volu" class="ghost" type="button" aria-label="Volume up">+</button>
+          </div>
+          <div class="volx">
+            <button id="vollast" class="ghost" type="button" hidden>Last volume</button>
+            <label class="chk"><input id="volboot" type="checkbox"><span>Start at the last volume after a reboot</span></label>
+          </div>
+          <p id="volnote" class="note"></p>
+        </section>
 
-  <section id="vol" class="card">
-    <div class="vol"><h2>Volume</h2><output id="volv" for="volr">0%</output></div>
-    <div class="volrow">
-      <button id="vold" class="ghost" type="button" aria-label="Volume down">&minus;</button>
-      <input id="volr" type="range" min="0" max="100" step="1" value="0" aria-label="Volume">
-      <button id="volu" class="ghost" type="button" aria-label="Volume up">+</button>
+        <section id="stations">
+          <div class="head"><h2>Stations</h2></div>
+          <div class="card list">
+            <ul id="slist"></ul>
+            <p id="sempty" class="note center" hidden>No stations configured.</p>
+          </div>
+        </section>
+      </div>
+
+      <div class="col">
+        <section id="now" class="card" hidden>
+          <dl class="kv">
+            <dt>Network</dt><dd id="k-ssid">-</dd>
+            <dt>Address</dt><dd id="k-ip">-</dd>
+            <dt>Signal</dt><dd id="k-sig">-</dd>
+          </dl>
+          <button id="forget" class="btn danger block" type="button">Forget this network</button>
+        </section>
+
+        <section id="picker">
+          <div class="head"><h2>Wi-Fi networks</h2><button id="rescan" class="ghost" type="button">Rescan</button></div>
+          <div class="card list">
+            <ul id="list"></ul>
+            <p id="empty" class="note center" hidden>No networks found yet.</p>
+          </div>
+        </section>
+      </div>
     </div>
-    <p id="volnote" class="note"></p>
-  </section>
 
-  <section id="stations">
-    <div class="head"><h2>Stations</h2></div>
-    <div class="card list">
-      <p id="nowp" class="now" style="margin:12px 16px 0"></p>
-      <ul id="slist"></ul>
-      <p id="sempty" class="note center" hidden>No stations configured.</p>
-    </div>
-  </section>
-
-  <section id="picker">
-    <div class="head"><h2>Wi-Fi networks</h2><button id="rescan" class="ghost" type="button">Rescan</button></div>
-    <div class="card list">
-      <ul id="list"></ul>
-      <p id="empty" class="note center" hidden>No networks found yet.</p>
-    </div>
-  </section>
-
-  <section id="busy" class="card center" hidden aria-live="polite"></section>
+    <section id="busy" class="card center" hidden aria-live="polite"></section>
   </div>
 
   <section id="console" hidden>
     <div class="consolebar">
       <h2>Serial console</h2>
-      <button id="logpause" class="ghost" type="button">Pause</button>
+      <button id="logpause" class="ghost" type="button">Resume</button>
       <button id="logclear" class="ghost" type="button">Clear</button>
       <button id="logback" class="ghost" type="button">Back</button>
     </div>
-    <div id="logbox" role="log" aria-live="off"></div>
+    <div id="logbox" role="log" aria-live="off" data-hint=""></div>
   </section>
 </main>
 
@@ -176,7 +227,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const api=async(p,o)=>{const r=await fetch(p,o);if(!r.ok)throw new Error(r.status);return r.json()};
 const post=(p,d)=>api(p,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(d||{})});
 
-let st={},nets=[],openKey=null,working=false,lastVol=0,volTimer=0;
+let st={},nets=[],openKey=null,working=false,lastVol=0,volTimer=0,curVol=0;
 
 const LOCK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="Secured"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
 function bars(rssi){
@@ -186,6 +237,13 @@ function bars(rssi){
   return s+'</svg>';
 }
 const quality=r=>r>-55?"Excellent":r>-65?"Good":r>-75?"Fair":"Weak";
+
+/* the panels that are hidden while a Wi-Fi change is in progress */
+function setWorking(w){
+  working=w;
+  for(const id of ["#np","#vol","#stations","#picker"])$(id).hidden=w;
+  if(w)$("#now").hidden=true;
+}
 
 /* ---- status ---- */
 let shown="";
@@ -199,17 +257,18 @@ function showStatus(s){
   pill.className="pill "+(on?"on":s.state==="connecting"?"wait":"setup");
   pill.lastChild.textContent=on?"Online":s.state==="connecting"?"Connecting":"Setup mode";
   $("#now").hidden=!on||working;
-  $("#vol").hidden=working; /* volume works in setup mode too */
   if(on){
     $("#k-ssid").textContent=s.ssid||"-";
     $("#k-ip").textContent=s.ip||"-";
     $("#k-sig").textContent=s.rssi?quality(s.rssi):"-";
   }
+  curVol=s.volume;
   if(Date.now()-lastVol>2500){setVol(s.volume)}
+  updLast();
   $("#volnote").textContent=!s.dac?"No USB speaker connected.":
     s.hw?"Using the speaker's own volume control.":
-    "Digital volume. It always starts low after a restart.";
-  if(changed&&!working)render(); /* refresh the "Connected" tag */
+    "Digital volume. It starts low after every restart.";
+  if(changed&&!working)render();
 }
 function setVol(v){$("#volr").value=v;$("#volr").style.setProperty("--p",v+"%");$("#volv").textContent=v+"%"}
 async function refresh(){
@@ -284,8 +343,7 @@ async function loadNets(refresh){
 
 /* ---- connecting ---- */
 function busy(kind,title,text,actions){
-  working=true;
-  $("#picker").hidden=true;$("#now").hidden=true;$("#vol").hidden=true;
+  setWorking(true);
   const b=$("#busy");b.hidden=false;b.textContent="";
   if(kind==="spin")b.appendChild(el("div","spin"));
   else b.appendChild(el("div","mark "+kind,kind==="ok"?"✓":"!"));
@@ -294,8 +352,8 @@ function busy(kind,title,text,actions){
   (actions||[]).forEach(a=>{const x=el("button","btn block",a.label);x.type="button";x.onclick=a.run;b.appendChild(x)});
 }
 function done(){
-  working=false;$("#busy").hidden=true;$("#picker").hidden=false;openKey=null;
-  refresh();render();
+  setWorking(false);$("#busy").hidden=true;openKey=null;
+  refresh();refreshStations();render();
 }
 async function connect(ssid,pass){
   busy("spin","Connecting to "+ssid,"This can take up to 20 seconds.");
@@ -313,7 +371,7 @@ async function connect(ssid,pass){
     if(s.result==="ok"){
       st=s;
       const more=s.portal?" Switch your phone back to your normal Wi-Fi; this setup network closes in a few seconds.":"";
-      return busy("ok","Connected","The radio is online at http://"+s.ip+"/."+more,[{label:"Done",run:done}]);
+      return busy("ok","Connected","The radio is online at http://"+s.ip+"/ or http://webradio.local/."+more,[{label:"Done",run:done}]);
     }
     if(s.result==="fail")
       return busy("bad","Could not connect",(s.error||"Connection failed")+". Check the password and try again.",[{label:"Try again",run:done}]);
@@ -341,6 +399,8 @@ $("#forget").onclick=async e=>{
 const vr=$("#volr");
 function sendVol(){
   lastVol=Date.now();
+  curVol=+vr.value;
+  updLast();
   post("/api/volume",{level:vr.value}).catch(()=>{});
 }
 vr.oninput=()=>{
@@ -350,53 +410,88 @@ vr.oninput=()=>{
   clearTimeout(volTimer);volTimer=setTimeout(sendVol,120);
 };
 vr.onchange=()=>{clearTimeout(volTimer);sendVol()};
-/* -/+ buttons: 1 % per tap (about 0.6 dB) */
+/* -/+ buttons: 1 % per tap (about 0.6 dB); fast taps are sent together */
 const stepVol=d=>{
-  const v=Math.max(0,Math.min(100,(+vr.value)+d));
-  vr.value=v;
+  vr.value=Math.max(0,Math.min(100,(+vr.value)+d));
   vr.oninput();
-  vr.onchange();
 };
 $("#vold").onclick=()=>stepVol(-1);
 $("#volu").onclick=()=>stepVol(1);
 
-/* ---- stations ---- */
-let sd={current:0,streaming:false,title:"",stations:[]};
+/* last volume of the previous session */
+function updLast(){
+  const b=$("#vollast"),v=sd.lastvol;
+  b.hidden=!(v>0)||v===curVol;
+  if(v>0)b.textContent="Last volume: "+v+"%";
+}
+$("#vollast").onclick=()=>{
+  if(!(sd.lastvol>0))return;
+  vr.value=sd.lastvol;
+  vr.oninput();vr.onchange();
+};
+$("#volboot").onchange=e=>{
+  sd.volboot=e.target.checked;
+  post("/api/settings",{volboot:e.target.checked?"1":"0"}).catch(()=>{});
+};
+
+/* ---- now playing and stations ---- */
+let sd={current:0,streaming:false,paused:false,title:"",lastvol:-1,volboot:false,stations:[]};
+function renderNow(){
+  const name=sd.stations[sd.current]||"";
+  const state=sd.paused?"Stopped":sd.streaming?"Playing":"Connecting";
+  $("#npname").textContent=name||"-";
+  $("#nptitle").textContent=sd.paused?"":sd.streaming?(sd.title||""):"Connecting to the stream…";
+  const s=$("#npstate");
+  s.className="npstate "+(sd.paused?"":sd.streaming?"play":"wait");
+  s.textContent="";
+  if(sd.streaming&&!sd.paused){const eq=el("span","bars");eq.append(el("b"),el("b"),el("b"));s.appendChild(eq)}
+  s.appendChild(document.createTextNode(state));
+  const b=$("#playbtn");
+  b.textContent=sd.paused?"Play":"Stop";
+  b.className=sd.paused?"btn block":"btn danger block";
+}
 function renderStations(){
   const ul=$("#slist");
   ul.textContent="";
   $("#sempty").hidden=sd.stations.length>0;
-  $("#nowp").hidden=sd.stations.length===0;
-  const cur=sd.stations[sd.current]||"";
-  $("#nowp").textContent=!sd.stations.length?"":
-    !sd.streaming?"Connecting to "+cur+"…":(sd.title?"Now playing: "+sd.title:"Playing "+cur);
   sd.stations.forEach((name,i)=>{
     const li=el("li");
-    const b=el("button","row");
+    const b=el("button","row"+(i===sd.current?" cur":""));
     b.type="button";
     b.appendChild(el("span","name",name));
     if(i===sd.current){
-      if(sd.streaming){const eq=el("span","bars");eq.append(el("b"),el("b"),el("b"));b.appendChild(eq)}
-      else b.appendChild(el("span","tag dim","Connecting"));
+      b.appendChild(el("span","tag"+(sd.paused||!sd.streaming?" dim":""),sd.paused?"Stopped":sd.streaming?"Playing":"Connecting"));
     }
     b.onclick=()=>pickStation(i);
     li.appendChild(b);ul.appendChild(li);
   });
 }
+function renderAll(){
+  renderNow();renderStations();updLast();
+  if(document.activeElement!==$("#volboot"))$("#volboot").checked=!!sd.volboot;
+}
 async function refreshStations(){
-  try{sd=await api("/api/stations");renderStations()}catch(_){}
+  try{sd=await api("/api/stations");renderAll()}catch(_){}
 }
 async function pickStation(i){
-  if(i===sd.current&&sd.streaming)return;
-  sd.current=i;sd.streaming=false;sd.title="";renderStations();
+  if(i===sd.current&&sd.streaming&&!sd.paused)return;
+  sd.current=i;sd.streaming=false;sd.paused=false;sd.title="";renderAll();
   try{await post("/api/station",{index:i})}catch(_){}
   setTimeout(refreshStations,1500);
 }
+$("#playbtn").onclick=async()=>{
+  const stop=!sd.paused;
+  sd.paused=stop;if(stop){sd.streaming=false;sd.title=""}
+  renderAll();
+  try{await post("/api/play",{state:stop?"stop":"play"})}catch(_){}
+  setTimeout(refreshStations,stop?400:1500);
+};
 
-/* ---- serial console ---- */
-let logOn=false,logPaused=false,logPos=0,logTimer=0,logPart="";
+/* ---- serial console (starts paused; tap Resume) ---- */
+let logOn=false,logPaused=true,logPos=0,logTimer=0,logPart="";
 const box=$("#logbox");
-function logClear(){box.textContent="";logPart=""}
+function logHint(){box.dataset.hint=logPaused?"Paused. Tap Resume to show the log.":"Waiting for log output…"}
+function logClear(){box.textContent="";logPart="";logHint()}
 function logAdd(t){
   const stick=box.scrollTop+box.clientHeight>=box.scrollHeight-24;
   const lines=(logPart+t).split("\n");
@@ -426,23 +521,25 @@ async function logPoll(){
   }catch(_){wait=2500}
   logTimer=setTimeout(logPoll,wait);
 }
+function logSetPaused(p){
+  logPaused=p;
+  $("#logpause").textContent=p?"Resume":"Pause";
+  logHint();
+  if(p)clearTimeout(logTimer);else logPoll();
+}
 function logOpen(on){
   logOn=on;
   $("#mainview").hidden=on;
   $("#console").hidden=!on;
   $("#conbtn").setAttribute("aria-expanded",String(on));
   $("#conbtn").textContent=on?"Radio":"Console";
-  if(on){logPaused=false;$("#logpause").textContent="Pause";logPoll()}
+  if(on)logSetPaused(true); /* always opens paused */
   else clearTimeout(logTimer);
 }
 $("#conbtn").onclick=()=>logOpen(!logOn);
 $("#logback").onclick=()=>logOpen(false);
 $("#logclear").onclick=logClear;
-$("#logpause").onclick=()=>{
-  logPaused=!logPaused;
-  $("#logpause").textContent=logPaused?"Resume":"Pause";
-  if(!logPaused)logPoll();
-};
+$("#logpause").onclick=()=>logSetPaused(!logPaused);
 
 $("#rescan").onclick=()=>loadNets(true);
 

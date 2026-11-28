@@ -51,6 +51,8 @@
 #define BODY_MAX         256
 
 void radio_player_select(size_t index); /* radio_player.c */
+void radio_player_set_paused(bool paused);
+bool radio_player_is_paused(void);
 static void mdns_start_once(void);
 static void log_capture_start(void);
 
@@ -726,6 +728,7 @@ static esp_err_t volume_post(httpd_req_t *req) {
     return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad level");
   }
   audio_output_set_volume_percent((int)v);
+  s_vol_touched = true;
 
   char buf[40];
   jbuf_t j = {.p = buf, .cap = sizeof(buf)};
@@ -777,6 +780,21 @@ static esp_err_t not_found(httpd_req_t *req, httpd_err_code_t err) {
   return ESP_OK;
 }
 
+
+/* ── Saved settings: last station and last volume ────────────────────────── */
+/* The station is saved whenever it has changed (from the page or the button).
+ * The volume is saved after the page changed it.  Playback always starts on
+ * boot; the volume starts low unless "start at last volume" is switched on. */
+
+#define SET_NS "radio"
+
+static int s_saved_station = -1;
+static int s_saved_vol = -1;
+static int s_boot_last_vol = -1; /* volume of the previous session (1-100) */
+static bool s_vol_boot;          /* start at the last volume after a reboot */
+static volatile bool s_vol_touched;
+
+
 /* ── Stations ────────────────────────────────────────────────────────────── */
 
 static bool read_body(httpd_req_t *req, char *body, size_t size) {
@@ -820,6 +838,12 @@ static esp_err_t stations_get(httpd_req_t *req) {
   j_int(&j, current_station_index(&st));
   j_raw(&j, ",\"streaming\":");
   j_raw(&j, st.streaming ? "true" : "false");
+  j_raw(&j, ",\"paused\":");
+  j_raw(&j, radio_player_is_paused() ? "true" : "false");
+  j_raw(&j, ",\"lastvol\":");
+  j_int(&j, s_boot_last_vol);
+  j_raw(&j, ",\"volboot\":");
+  j_raw(&j, s_vol_boot ? "true" : "false");
   j_raw(&j, ",\"title\":");
   j_str(&j, st.title);
   j_raw(&j, ",\"stations\":[");
@@ -856,6 +880,115 @@ static esp_err_t station_post(httpd_req_t *req) {
   buf[0] = '\0';
   j_raw(&j, "{\"current\":");
   j_int(&j, (int)v);
+  j_raw(&j, "}");
+  return send_json(req, &j);
+}
+
+static void settings_put(const char *key, uint32_t val, bool is_u8) {
+  nvs_handle_t h;
+  if (nvs_open(SET_NS, NVS_READWRITE, &h) != ESP_OK) {
+    return;
+  }
+  if (is_u8) {
+    nvs_set_u8(h, key, (uint8_t)val);
+  } else {
+    nvs_set_u32(h, key, val);
+  }
+  nvs_commit(h);
+  nvs_close(h);
+}
+
+static void settings_load(void) {
+  nvs_handle_t h;
+  if (nvs_open(SET_NS, NVS_READONLY, &h) != ESP_OK) {
+    return;
+  }
+  uint32_t st = 0;
+  uint8_t v = 0, f = 0;
+  if (nvs_get_u32(h, "station", &st) == ESP_OK && st < g_station_count) {
+    s_saved_station = (int)st;
+  }
+  if (nvs_get_u8(h, "volume", &v) == ESP_OK && v >= 1 && v <= 100) {
+    s_boot_last_vol = v;
+    s_saved_vol = v;
+  }
+  if (nvs_get_u8(h, "volboot", &f) == ESP_OK) {
+    s_vol_boot = f != 0;
+  }
+  nvs_close(h);
+}
+
+/* Apply what was saved.  Called before the radio task starts. */
+static void settings_apply(void) {
+  if (s_saved_station > 0) {
+    radio_player_select((size_t)s_saved_station);
+  }
+  if (s_vol_boot && s_boot_last_vol > 0) {
+    ESP_LOGI(TAG, "Starting at the last volume, %d%%", s_boot_last_vol);
+    audio_output_set_volume_percent(s_boot_last_vol);
+  }
+}
+
+static void settings_task(void *arg) {
+  (void)arg;
+  int seen_st = -1, seen_vol = -1;
+  while (true) {
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    radio_player_stats_t st;
+    radio_player_get_stats(&st);
+    int cur = current_station_index(&st);
+    /* write only once the value has stayed the same for a whole period */
+    if (cur == seen_st && cur != s_saved_station) {
+      settings_put("station", (uint32_t)cur, false);
+      s_saved_station = cur;
+    }
+    seen_st = cur;
+    if (s_vol_touched) {
+      int v = audio_output_get_volume_percent();
+      if (v == seen_vol && v > 0 && v != s_saved_vol) {
+        settings_put("volume", (uint32_t)v, true);
+        s_saved_vol = v;
+      }
+      seen_vol = v;
+    }
+  }
+}
+
+static esp_err_t play_post(httpd_req_t *req) {
+  char body[48], st[8];
+  if (!read_body(req, body, sizeof(body)) ||
+      form_get(body, "state", st, sizeof(st)) != 1) {
+    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad request");
+  }
+  if (strcmp(st, "stop") == 0) {
+    radio_player_set_paused(true);
+  } else if (strcmp(st, "play") == 0) {
+    radio_player_set_paused(false);
+  } else {
+    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad state");
+  }
+  char buf[32];
+  jbuf_t j = {.p = buf, .cap = sizeof(buf)};
+  buf[0] = '\0';
+  j_raw(&j, "{\"paused\":");
+  j_raw(&j, radio_player_is_paused() ? "true" : "false");
+  j_raw(&j, "}");
+  return send_json(req, &j);
+}
+
+static esp_err_t settings_post(httpd_req_t *req) {
+  char body[48], v[4];
+  if (!read_body(req, body, sizeof(body)) ||
+      form_get(body, "volboot", v, sizeof(v)) != 1) {
+    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad request");
+  }
+  s_vol_boot = v[0] == '1';
+  settings_put("volboot", s_vol_boot ? 1 : 0, true);
+  char buf[32];
+  jbuf_t j = {.p = buf, .cap = sizeof(buf)};
+  buf[0] = '\0';
+  j_raw(&j, "{\"volboot\":");
+  j_raw(&j, s_vol_boot ? "true" : "false");
   j_raw(&j, "}");
   return send_json(req, &j);
 }
@@ -966,12 +1099,20 @@ static esp_err_t log_get(httpd_req_t *req) {
 }
 
 /* ── mDNS: answers "webradio.local" ──────────────────────────────────────── */
+/* A small responder for one name.  Apple devices ask for A and AAAA together;
+ * answering AAAA with an NSEC ("no IPv6 address") lets them stop waiting, which
+ * is what makes lookups fast and reliable.  Replies go to the multicast group
+ * and, for "unicast please" (QU) questions, also straight to the asker. */
 
 #define MDNS_PORT 5353
 #define MDNS_NAME "webradio.local"
+#define MDNS_ANNOUNCE_MS 45000
 
 static volatile int s_mdns_announce;
 static bool s_mdns_started;
+
+static const uint8_t k_mdns_name[] = {8, 'w', 'e', 'b', 'r', 'a', 'd', 'i', 'o',
+                                      5, 'l', 'o', 'c', 'a', 'l', 0};
 
 /* Read a (non-compressed) name starting at pos into out as "a.b.c".
  * Returns the position after the name, or 0 if it is not usable. */
@@ -997,17 +1138,20 @@ static size_t mdns_read_name(const uint8_t *pkt, size_t len, size_t pos,
   return 0;
 }
 
+/* Build a response with an A record and/or an NSEC record for our name.
+ * question != NULL builds a legacy unicast reply that repeats the question. */
 static size_t mdns_build(uint8_t *out, uint16_t id, const uint8_t *question,
-                         size_t qlen, uint32_t ip_be) {
+                         size_t qlen, uint32_t ip_be, bool want_a,
+                         bool want_nsec) {
   size_t n = 0;
   out[n++] = (uint8_t)(id >> 8);
   out[n++] = (uint8_t)id;
   out[n++] = 0x84; /* response, authoritative */
   out[n++] = 0x00;
   out[n++] = 0;
-  out[n++] = question ? 1 : 0; /* questions (legacy unicast only) */
+  out[n++] = question ? 1 : 0;
   out[n++] = 0;
-  out[n++] = 1; /* answers */
+  out[n++] = (uint8_t)((want_a ? 1 : 0) + (want_nsec ? 1 : 0));
   out[n++] = 0;
   out[n++] = 0;
   out[n++] = 0;
@@ -1016,23 +1160,46 @@ static size_t mdns_build(uint8_t *out, uint16_t id, const uint8_t *question,
     memcpy(out + n, question, qlen);
     n += qlen;
   }
-  static const uint8_t name[] = {8, 'w', 'e', 'b', 'r', 'a', 'd', 'i', 'o',
-                                 5, 'l', 'o', 'c', 'a', 'l', 0};
-  memcpy(out + n, name, sizeof(name));
-  n += sizeof(name);
-  out[n++] = 0;
-  out[n++] = 1; /* type A */
-  out[n++] = question ? 0x00 : 0x80; /* cache-flush bit for multicast */
-  out[n++] = 1; /* class IN */
-  out[n++] = 0;
-  out[n++] = 0;
-  out[n++] = 0;
-  out[n++] = 120; /* TTL */
-  out[n++] = 0;
-  out[n++] = 4;
-  memcpy(out + n, &ip_be, 4);
-  n += 4;
+  const uint8_t cls = question ? 0x00 : 0x80; /* cache-flush bit (multicast) */
+  if (want_a) {
+    memcpy(out + n, k_mdns_name, sizeof(k_mdns_name));
+    n += sizeof(k_mdns_name);
+    const uint8_t rr[] = {0, 1, cls, 1, 0, 0, 0, 120, 0, 4};
+    memcpy(out + n, rr, sizeof(rr));
+    n += sizeof(rr);
+    memcpy(out + n, &ip_be, 4);
+    n += 4;
+  }
+  if (want_nsec) {
+    memcpy(out + n, k_mdns_name, sizeof(k_mdns_name));
+    n += sizeof(k_mdns_name);
+    const uint8_t rr[] = {0, 47, cls, 1, 0, 0, 0, 120, 0, 19};
+    memcpy(out + n, rr, sizeof(rr));
+    n += sizeof(rr);
+    memcpy(out + n, k_mdns_name, sizeof(k_mdns_name)); /* next name */
+    n += sizeof(k_mdns_name);
+    const uint8_t bitmap[] = {0, 1, 0x40}; /* only type A (1) exists */
+    memcpy(out + n, bitmap, sizeof(bitmap));
+    n += sizeof(bitmap);
+  }
   return n;
+}
+
+static void mdns_join(int sock, esp_netif_ip_info_t *ip, bool have_ip) {
+  struct ip_mreq mreq = {
+      .imr_multiaddr.s_addr = inet_addr("224.0.0.251"),
+      .imr_interface.s_addr = htonl(INADDR_ANY),
+  };
+  /* Leave and join again so the router sees a fresh membership report. */
+  setsockopt(sock, IPPROTO_IP, IP_DROP_MEMBERSHIP, &mreq, sizeof(mreq));
+  if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) <
+      0) {
+    ESP_LOGW(TAG, "mDNS: could not join the multicast group");
+  }
+  if (have_ip) {
+    struct in_addr ifa = {.s_addr = ip->ip.addr};
+    setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF, &ifa, sizeof(ifa));
+  }
 }
 
 static void mdns_task(void *arg) {
@@ -1059,14 +1226,6 @@ static void mdns_task(void *arg) {
     vTaskDelete(NULL);
     return;
   }
-  struct ip_mreq mreq = {
-      .imr_multiaddr.s_addr = inet_addr("224.0.0.251"),
-      .imr_interface.s_addr = htonl(INADDR_ANY),
-  };
-  if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) <
-      0) {
-    ESP_LOGW(TAG, "mDNS: could not join the multicast group");
-  }
   uint8_t ttl = 255;
   setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
   struct timeval tv = {.tv_sec = 1, .tv_usec = 0};
@@ -1080,18 +1239,34 @@ static void mdns_task(void *arg) {
   ESP_LOGI(TAG, "mDNS: answering http://" MDNS_NAME "/");
 
   uint8_t rx[512];
-  uint8_t tx[160];
+  uint8_t tx[192];
+  TickType_t last_announce = 0;
+  uint32_t last_ip = 0;
+
   while (true) {
-    esp_netif_ip_info_t ip;
+    esp_netif_ip_info_t ip = {0};
     bool have_ip = s_sta_netif &&
                    esp_netif_get_ip_info(s_sta_netif, &ip) == ESP_OK &&
                    ip.ip.addr != 0;
 
-    if (s_mdns_announce > 0) { /* unsolicited announcement after (re)connect */
+    if (have_ip && ip.ip.addr != last_ip) { /* new address: join and announce */
+      last_ip = ip.ip.addr;
+      s_mdns_announce = 3; /* joins the group again and announces */
+    }
+    TickType_t now = xTaskGetTickCount();
+    if (have_ip && s_mdns_announce == 0 &&
+        (now - last_announce) > pdMS_TO_TICKS(MDNS_ANNOUNCE_MS)) {
+      s_mdns_announce = 1; /* refresh other devices' caches now and then */
+    }
+    if (s_mdns_announce > 0) {
+      if (s_mdns_announce == 3) {
+        mdns_join(sock, &ip, have_ip);
+      }
       s_mdns_announce--;
       if (have_ip) {
-        size_t n = mdns_build(tx, 0, NULL, 0, ip.ip.addr);
+        size_t n = mdns_build(tx, 0, NULL, 0, ip.ip.addr, true, true);
         sendto(sock, tx, n, 0, (struct sockaddr *)&group, sizeof(group));
+        last_announce = now;
       }
     }
 
@@ -1106,6 +1281,8 @@ static void mdns_task(void *arg) {
     }
     int qd = (rx[4] << 8) | rx[5];
     size_t pos = 12;
+    bool want_a = false, want_nsec = false, qu = false;
+    size_t first_q = 0, first_qlen = 0;
     for (int i = 0; i < qd && pos < (size_t)len; i++) {
       size_t qstart = pos;
       char name[64];
@@ -1114,19 +1291,44 @@ static void mdns_task(void *arg) {
         break;
       }
       int type = (rx[pos] << 8) | rx[pos + 1];
+      int cls = (rx[pos + 2] << 8) | rx[pos + 3];
       pos += 4;
-      if (strcmp(name, MDNS_NAME) != 0 || (type != 1 && type != 255)) {
+      if (strcmp(name, MDNS_NAME) != 0) {
         continue;
       }
-      uint16_t id = (uint16_t)((rx[0] << 8) | rx[1]);
-      if (ntohs(from.sin_port) == MDNS_PORT) {
-        size_t n = mdns_build(tx, 0, NULL, 0, ip.ip.addr);
-        sendto(sock, tx, n, 0, (struct sockaddr *)&group, sizeof(group));
-      } else { /* plain unicast DNS query (e.g. nslookup) */
-        size_t n = mdns_build(tx, id, rx + qstart, pos - qstart, ip.ip.addr);
-        sendto(sock, tx, n, 0, (struct sockaddr *)&from, sizeof(from));
+      bool hit = true;
+      if (type == 1 || type == 255) {
+        want_a = true;
+      } else if (type == 28) {
+        want_nsec = true; /* we have no IPv6 address */
+      } else {
+        hit = false;
       }
-      break;
+      if (hit) {
+        if (cls & 0x8000) {
+          qu = true;
+        }
+        if (!first_qlen) {
+          first_q = qstart;
+          first_qlen = pos - qstart;
+        }
+      }
+    }
+    if (!want_a && !want_nsec) {
+      continue;
+    }
+    if (ntohs(from.sin_port) != MDNS_PORT) {
+      /* plain unicast DNS query (e.g. nslookup): reply to the sender only */
+      uint16_t id = (uint16_t)((rx[0] << 8) | rx[1]);
+      size_t n = mdns_build(tx, id, rx + first_q, first_qlen, ip.ip.addr,
+                            want_a, want_nsec);
+      sendto(sock, tx, n, 0, (struct sockaddr *)&from, sizeof(from));
+      continue;
+    }
+    size_t n = mdns_build(tx, 0, NULL, 0, ip.ip.addr, want_a, want_nsec);
+    sendto(sock, tx, n, 0, (struct sockaddr *)&group, sizeof(group));
+    if (qu) {
+      sendto(sock, tx, n, 0, (struct sockaddr *)&from, sizeof(from));
     }
   }
 }
@@ -1168,6 +1370,8 @@ static esp_err_t web_start(void) {
       {.uri = "/api/stations", .method = HTTP_GET, .handler = stations_get},
       {.uri = "/api/station", .method = HTTP_POST, .handler = station_post},
       {.uri = "/api/log", .method = HTTP_GET, .handler = log_get},
+      {.uri = "/api/play", .method = HTTP_POST, .handler = play_post},
+      {.uri = "/api/settings", .method = HTTP_POST, .handler = settings_post},
   };
   for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
     httpd_register_uri_handler(s_httpd, &uris[i]);
@@ -1200,6 +1404,7 @@ esp_err_t wifi_manager_start(void) {
   }
 
   creds_load();
+  settings_load();
 
   err = esp_netif_init();
   if (err != ESP_OK) {
@@ -1239,6 +1444,8 @@ esp_err_t wifi_manager_start(void) {
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "Web server failed: %s", esp_err_to_name(err));
   }
+  settings_apply();
+  xTaskCreate(settings_task, "settings", 4096, NULL, 2, NULL);
 
   if (!s_have_creds) {
     ESP_LOGI(TAG, "No saved network");

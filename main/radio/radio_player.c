@@ -70,6 +70,7 @@ static volatile uint32_t s_dec_gen;
 /* Incremented by radio_player_select() to make the network task switch. */
 static volatile uint32_t s_select_gen;
 static volatile size_t s_station;
+static volatile bool s_paused; /* stopped from the web page; not saved */
 static volatile esp_audio_simple_dec_type_t s_codec;
 
 static volatile bool s_streaming;
@@ -321,7 +322,24 @@ static void net_task(void *arg) {
   uint32_t backoff_ms = 1000;
   bool first = true;
 
+  bool stopped_flushed = false;
+
   while (true) {
+    if (s_paused) {
+      /* Stopped: drop what is buffered once, then idle until resumed. */
+      s_streaming = false;
+      if (!stopped_flushed) {
+        stopped_flushed = true;
+        flush_decoder();
+        audio_output_flush();
+        s_title[0] = '\0';
+        flushed_for = UINT32_MAX; /* force a clean start when resumed */
+      }
+      vTaskDelay(pdMS_TO_TICKS(200));
+      continue;
+    }
+    stopped_flushed = false;
+
     if (!wifi_manager_is_connected()) {
       vTaskDelay(pdMS_TO_TICKS(500));
       continue;
@@ -673,7 +691,21 @@ void radio_player_select(size_t index) {
   }
   ESP_LOGI(TAG, "Switching to \"%s\"", g_stations[index].name);
   s_station = index;
+  s_paused = false; /* choosing a station starts playback */
   s_select_gen++;
+}
+
+void radio_player_set_paused(bool paused) {
+  if (s_paused == paused) {
+    return;
+  }
+  ESP_LOGI(TAG, "%s", paused ? "Stopped" : "Resumed");
+  s_paused = paused;
+  s_select_gen++; /* makes the network task leave the current stream */
+}
+
+bool radio_player_is_paused(void) {
+  return s_paused;
 }
 
 void radio_player_next(void) {
