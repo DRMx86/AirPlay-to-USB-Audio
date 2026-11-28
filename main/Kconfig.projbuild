@@ -3,16 +3,29 @@ menu "Web Radio to USB DAC Audio"
 
     menu "Wi-Fi"
 
-        config RADIO_WIFI_SSID
-            string "Wi-Fi network name (SSID)"
+        config WIFI_AP_SSID
+            string "Setup access point name"
+            default "WebRadio"
+            help
+                Name of the Wi-Fi network the radio opens when it has no saved
+                network (or cannot reach it). Join it with a phone or laptop;
+                the setup page opens by itself, or go to http://192.168.4.1/.
+
+        config WIFI_AP_PASSWORD
+            string "Setup access point password"
             default ""
             help
-                Network the ESP32 joins to reach the radio stream.
-                Leave the password empty for an open network.
+                Leave empty for an open setup network, or use 8 to 63
+                characters for WPA2. The network is only up while setting up.
 
-        config RADIO_WIFI_PASSWORD
-            string "Wi-Fi password"
-            default ""
+        config WIFI_MAX_RETRY
+            int "Connection attempts before opening the setup portal"
+            default 5
+            range 1 30
+            help
+                How often the saved network is tried at boot before the setup
+                access point opens. Once connected, a dropped link is retried
+                forever without opening the portal.
 
     endmenu
 
@@ -87,6 +100,18 @@ menu "Web Radio to USB DAC Audio"
                 the USB DAC (after start-up or after an underrun). Must be
                 smaller than the buffer size. This is roughly the steady-state
                 latency added by the buffer.
+
+        config USB_AUDIO_INITIAL_VOLUME_PERCENT
+            int "Initial volume (%)"
+            default 10
+            range 0 100
+            help
+                Volume used at every boot and whenever a USB DAC is plugged in,
+                before any audio is sent. Keep it low: a speaker that was left
+                loud (or a DAC that defaults to maximum) must never blast.
+                0 starts muted. The volume can then be changed from the web
+                page, or with the speaker's own controls if it has them.
+                The percentage covers the top 60 dB of the DAC's volume range.
 
         config USB_HOST_VBUS_EN_GPIO
             int "USB host VBUS enable GPIO (-1 = none)"

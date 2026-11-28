@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0a0c0f">
+<title>WebRadio</title>
+<style>
+:root{
+  --bg:#0a0c0f;--panel:#12161b;--hover:#181d23;--line:#222932;
+  --text:#e9edf2;--muted:#8b95a3;--accent:#5eead4;--ink:#04201b;
+  --warn:#fbbf24;--err:#f87171;--r:14px;color-scheme:dark
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);min-height:100vh;
+  font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  -webkit-font-smoothing:antialiased}
+main{max-width:440px;margin:0 auto;padding:max(24px,env(safe-area-inset-top)) 16px 48px}
+[hidden]{display:none!important}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:24px}
+.brand{display:flex;align-items:center;gap:10px}
+.brand svg{width:26px;height:26px;color:var(--accent)}
+h1{font-size:21px;font-weight:650;letter-spacing:-.01em;margin:0}
+h2{font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0}
+.pill{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);
+  border:1px solid var(--line);border-radius:999px;padding:5px 12px 5px 10px;white-space:nowrap}
+.pill i{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.pill.on i{background:var(--accent);box-shadow:0 0 0 3px rgba(94,234,212,.15)}
+.pill.setup i{background:var(--warn)}
+.pill.wait i{background:var(--warn);animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:20px}
+.head{display:flex;align-items:center;justify-content:space-between;margin:0 2px 10px;min-height:32px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;margin:0 0 14px;font-size:15px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;text-align:right;overflow-wrap:anywhere}
+button{font:inherit;color:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn{display:inline-flex;align-items:center;justify-content:center;height:44px;padding:0 18px;
+  border-radius:10px;border:1px solid transparent;font-weight:600;background:var(--accent);color:var(--ink)}
+.btn:active{filter:brightness(.92)}
+.btn:disabled{opacity:.5}
+.btn.block{width:100%}
+.ghost{background:none;border:1px solid var(--line);color:var(--text);border-radius:8px;height:32px;padding:0 12px;font-size:14px}
+.ghost:hover{background:var(--hover)}
+.danger{background:none;border:1px solid var(--line);color:var(--err);font-weight:500}
+.danger.sure{border-color:var(--err)}
+.list{padding:0;overflow:hidden}
+ul{list-style:none;margin:0;padding:0}
+li+li{border-top:1px solid var(--line)}
+.row{display:flex;align-items:center;gap:12px;width:100%;padding:14px 16px;background:none;border:0;text-align:left}
+.row:hover{background:var(--hover)}
+.row .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .tag{font-size:12px;color:var(--accent)}
+.row svg{width:18px;height:18px;flex:none;color:var(--muted)}
+.pw{display:flex;flex-direction:column;gap:10px;padding:2px 16px 16px}
+.field{display:flex;gap:8px}
+input[type=text],input[type=password]{flex:1;min-width:0;height:44px;padding:0 12px;border-radius:10px;
+  border:1px solid var(--line);background:#0d1115;color:var(--text);font:inherit}
+input::placeholder{color:#5d6773}
+.note{font-size:14px;color:var(--muted);margin:10px 2px 0}
+.err{color:var(--err)}
+.vol{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+output{font-variant-numeric:tabular-nums;font-weight:600}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:28px;background:none;margin:0}
+input[type=range]{--p:0%}
+input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;
+  background:linear-gradient(to right,var(--accent) var(--p),var(--line) var(--p))}
+input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:var(--line)}
+input[type=range]::-moz-range-progress{height:6px;border-radius:3px;background:var(--accent)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;border-radius:50%;
+  background:var(--accent);border:0;margin-top:-9px}
+input[type=range]::-moz-range-thumb{width:24px;height:24px;border-radius:50%;background:var(--accent);border:0}
+.center{text-align:center;padding:28px 16px}
+.center h3{margin:16px 0 4px;font-size:18px}
+.center p{margin:0 0 20px;color:var(--muted);overflow-wrap:anywhere}
+.spin{width:36px;height:36px;margin:0 auto;border-radius:50%;border:3px solid var(--line);
+  border-top-color:var(--accent);animation:rot .9s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+.mark{width:44px;height:44px;margin:0 auto;border-radius:50%;display:grid;place-items:center;font-size:22px}
+.mark.ok{background:rgba(94,234,212,.12);color:var(--accent)}
+.mark.bad{background:rgba(248,113,113,.12);color:var(--err)}
+@media (prefers-reduced-motion:reduce){.spin,.pill.wait i{animation:none}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6M8 5v14M12 8v8M16 3v18M20 9v6"/></svg>
+      <h1>WebRadio</h1>
+    </div>
+    <div id="pill" class="pill" role="status"><i></i><span>Loading</span></div>
+  </header>
+
+  <section id="now" class="card" hidden>
+    <dl class="kv">
+      <dt>Network</dt><dd id="k-ssid">-</dd>
+      <dt>Address</dt><dd id="k-ip">-</dd>
+      <dt>Signal</dt><dd id="k-sig">-</dd>
+    </dl>
+    <button id="forget" class="btn danger block" type="button">Forget this network</button>
+  </section>
+
+  <section id="vol" class="card" hidden>
+    <div class="vol"><h2>Volume</h2><output id="volv" for="volr">0%</output></div>
+    <input id="volr" type="range" min="0" max="100" step="1" value="0" aria-label="Volume">
+    <p id="volnote" class="note"></p>
+  </section>
+
+  <section id="picker">
+    <div class="head"><h2>Wi-Fi networks</h2><button id="rescan" class="ghost" type="button">Rescan</button></div>
+    <div class="card list">
+      <ul id="list"></ul>
+      <p id="empty" class="note center" hidden>No networks found yet.</p>
+    </div>
+  </section>
+
+  <section id="busy" class="card center" hidden aria-live="polite"></section>
+</main>
+
+<script>
+(()=>{
+"use strict";
+const $=s=>document.querySelector(s);
+const el=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e};
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const api=async(p,o)=>{const r=await fetch(p,o);if(!r.ok)throw new Error(r.status);return r.json()};
+const post=(p,d)=>api(p,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(d||{})});
+
+let st={},nets=[],openKey=null,working=false,lastVol=0,volTimer=0;
+
+const LOCK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="Secured"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
+function bars(rssi){
+  const n=rssi>-55?4:rssi>-65?3:rssi>-75?2:1;
+  let s='<svg viewBox="0 0 24 24" fill="currentColor" aria-label="Signal '+n+' of 4">';
+  for(let i=0;i<4;i++)s+='<rect x="'+(2+i*6)+'" y="'+(18-i*4.5)+'" width="4" height="'+(4+i*4.5)+'" rx="1" opacity="'+(i<n?1:.25)+'"/>';
+  return s+'</svg>';
+}
+const quality=r=>r>-55?"Excellent":r>-65?"Good":r>-75?"Fair":"Weak";
+
+/* ---- status ---- */
+let shown="";
+function showStatus(s){
+  const key=s.state+"|"+s.ssid;
+  const changed=key!==shown;
+  shown=key;
+  st=s;
+  const pill=$("#pill");
+  const on=s.state==="connected";
+  pill.className="pill "+(on?"on":s.state==="connecting"?"wait":"setup");
+  pill.lastChild.textContent=on?"Online":s.state==="connecting"?"Connecting":"Setup mode";
+  $("#now").hidden=!on||working;
+  $("#vol").hidden=!on||working;
+  if(on){
+    $("#k-ssid").textContent=s.ssid||"-";
+    $("#k-ip").textContent=s.ip||"-";
+    $("#k-sig").textContent=s.rssi?quality(s.rssi):"-";
+    if(Date.now()-lastVol>2500){setVol(s.volume)}
+    $("#volnote").textContent=!s.dac?"No USB speaker connected.":
+      s.hw?"Using the speaker's own volume control.":"Digital volume (this speaker has no volume control).";
+  }
+  if(changed&&!working)render(); /* refresh the "Connected" tag */
+}
+function setVol(v){$("#volr").value=v;$("#volr").style.setProperty("--p",v+"%");$("#volv").textContent=v+"%"}
+async function refresh(){
+  try{showStatus(await api("/api/status"))}catch(_){}
+}
+
+/* ---- network list ---- */
+function render(){
+  const ul=$("#list");
+  ul.textContent="";
+  $("#empty").hidden=nets.length>0;
+  const add=(key,label,secure,rssi,manual)=>{
+    const li=el("li");
+    const b=el("button","row");
+    b.type="button";
+    b.setAttribute("aria-expanded",String(openKey===key));
+    b.appendChild(el("span","name",label));
+    if(!manual&&st.ssid===label&&st.state==="connected")b.appendChild(el("span","tag","Connected"));
+    if(secure){const i=el("span");i.innerHTML=LOCK;b.appendChild(i.firstChild)}
+    if(rssi!=null){const i=el("span");i.innerHTML=bars(rssi);b.appendChild(i.firstChild)}
+    b.onclick=()=>{openKey=openKey===key?null:key;render()};
+    li.appendChild(b);
+    if(openKey===key)li.appendChild(form(label,secure,manual));
+    ul.appendChild(li);
+  };
+  nets.forEach(n=>add("n:"+n.ssid,n.ssid,n.secure,n.rssi,false));
+  add("other","Other network…",false,null,true);
+}
+function form(ssid,secure,manual){
+  const f=el("form","pw");
+  f.autocomplete="off";
+  let name=null,pass=null;
+  if(manual){
+    name=el("input");name.type="text";name.placeholder="Network name";name.maxLength=32;
+    name.autocapitalize="off";name.setAttribute("aria-label","Network name");
+    f.appendChild(name);
+  }
+  if(secure||manual){
+    const row=el("div","field");
+    pass=el("input");pass.type="password";pass.maxLength=63;
+    pass.placeholder=manual?"Password (blank if open)":"Password";
+    pass.autocapitalize="off";pass.setAttribute("aria-label","Password");
+    const show=el("button","ghost","Show");show.type="button";show.style.height="44px";
+    show.onclick=()=>{const p=pass.type==="password";pass.type=p?"text":"password";show.textContent=p?"Hide":"Show"};
+    row.append(pass,show);f.appendChild(row);
+  }
+  const msg=el("p","note err");msg.hidden=true;msg.style.margin="0";
+  const go=el("button","btn block","Connect");go.type="submit";
+  f.append(msg,go);
+  f.onsubmit=e=>{
+    e.preventDefault();
+    const s=manual?name.value.trim():ssid;
+    const p=pass?pass.value:"";
+    if(!s){msg.textContent="Enter the network name.";msg.hidden=false;return}
+    if(p&&(p.length<8||p.length>63)){msg.textContent="The password must be 8–63 characters.";msg.hidden=false;return}
+    connect(s,p);
+  };
+  setTimeout(()=>{const t=name||pass;if(t)t.focus()},0);
+  return f;
+}
+async function loadNets(refresh){
+  const btn=$("#rescan");
+  btn.disabled=true;btn.textContent="Scanning…";
+  try{
+    let d=await api("/api/networks"+(refresh?"?refresh=1":""));
+    for(let i=0;i<14&&d.scanning;i++){await sleep(1000);d=await api("/api/networks")}
+    nets=d.networks;
+  }catch(_){}
+  btn.disabled=false;btn.textContent="Rescan";
+  render();
+}
+
+/* ---- connecting ---- */
+function busy(kind,title,text,actions){
+  working=true;
+  $("#picker").hidden=true;$("#now").hidden=true;$("#vol").hidden=true;
+  const b=$("#busy");b.hidden=false;b.textContent="";
+  if(kind==="spin")b.appendChild(el("div","spin"));
+  else b.appendChild(el("div","mark "+kind,kind==="ok"?"✓":"!"));
+  b.appendChild(el("h3","",title));
+  b.appendChild(el("p","",text||""));
+  (actions||[]).forEach(a=>{const x=el("button","btn block",a.label);x.type="button";x.onclick=a.run;b.appendChild(x)});
+}
+function done(){
+  working=false;$("#busy").hidden=true;$("#picker").hidden=false;openKey=null;
+  refresh();render();
+}
+async function connect(ssid,pass){
+  busy("spin","Connecting to "+ssid,"This can take up to 20 seconds.");
+  let id;
+  try{id=(await post("/api/connect",{ssid,pass})).attempt}
+  catch(e){
+    return busy("bad","Could not start",e.message==="409"?"Another attempt is still running.":"The radio did not answer.",[{label:"Back",run:done}]);
+  }
+  const t0=Date.now();
+  while(Date.now()-t0<45000){
+    await sleep(1000);
+    let s;
+    try{s=await api("/api/status")}catch(_){continue} /* device is switching networks */
+    if(s.attempt!==id)continue;
+    if(s.result==="ok"){
+      st=s;
+      const more=s.portal?" Switch your phone back to your normal Wi-Fi; this setup network closes in a few seconds.":"";
+      return busy("ok","Connected","The radio is online at http://"+s.ip+"/."+more,[{label:"Done",run:done}]);
+    }
+    if(s.result==="fail")
+      return busy("bad","Could not connect",(s.error||"Connection failed")+". Check the password and try again.",[{label:"Try again",run:done}]);
+  }
+  busy("bad","No answer","Make sure your phone is on the same Wi-Fi as the radio, then try again.",[{label:"Back",run:done}]);
+}
+
+/* ---- forget ---- */
+let sureTimer=0;
+$("#forget").onclick=async e=>{
+  const b=e.currentTarget;
+  if(!b.classList.contains("sure")){
+    b.classList.add("sure");b.textContent="Tap again to confirm";
+    clearTimeout(sureTimer);
+    sureTimer=setTimeout(()=>{b.classList.remove("sure");b.textContent="Forget this network"},4000);
+    return;
+  }
+  clearTimeout(sureTimer);b.classList.remove("sure");b.textContent="Forget this network";
+  const ap=st.ap||"WebRadio";
+  try{await post("/api/forget")}catch(_){}
+  busy("ok","Network forgotten","Join the “"+ap+"” Wi-Fi network, then open this page to choose a new one.");
+};
+
+/* ---- volume ---- */
+const vr=$("#volr");
+function sendVol(){
+  lastVol=Date.now();
+  post("/api/volume",{level:vr.value}).catch(()=>{});
+}
+vr.oninput=()=>{
+  lastVol=Date.now();
+  vr.style.setProperty("--p",vr.value+"%");
+  $("#volv").textContent=vr.value+"%";
+  clearTimeout(volTimer);volTimer=setTimeout(sendVol,120);
+};
+vr.onchange=()=>{clearTimeout(volTimer);sendVol()};
+
+$("#rescan").onclick=()=>loadNets(true);
+
+refresh().then(()=>loadNets(true));
+setInterval(()=>{if(!working&&!document.hidden)refresh()},4000);
+})();
+</script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 set(SRC_FILES
     "main.c"
-    "net/wifi_sta.c"
+    "net/wifi_manager.c"
+    "net/captive_dns.c"
     "radio/radio_player.c"
     "radio/stations.c"
     "audio/audio_output_usb_host.c"
@@ -22,6 +23,8 @@ set(DEPS
     esp_netif
     esp_event
     esp_http_client
+    esp_http_server
+    lwip
     esp-tls
     mbedtls
     nvs_flash
@@ -35,4 +38,5 @@ idf_component_register(
     SRCS ${SRC_FILES}
     INCLUDE_DIRS ${INC_DIRS}
     PRIV_REQUIRES ${DEPS}
+    EMBED_FILES "net/portal.html"
 )

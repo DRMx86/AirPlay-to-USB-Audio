@@ -45,6 +45,9 @@
 #include "freertos/stream_buffer.h"
 #include "freertos/task.h"
 #include "usb/usb_host.h"
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define TAG         "audio_usbh"
@@ -97,7 +100,9 @@ static int s_out_subslot = 2;  /* device sample size in bytes: 2=16-bit, 3, 4 */
 static uint8_t s_uac_ver = 0;  /* UAC spec major version: 1 or 2 */
 
 static usb_transfer_t *s_urb[NUM_URBS];
-static SemaphoreHandle_t s_ctrl_sem = NULL;  /* control transfer completion */
+static SemaphoreHandle_t s_ctrl_sem = NULL; /* control transfer completion */
+static SemaphoreHandle_t s_ctrl_lock =
+    NULL; /* one control transfer at a time */
 static int16_t s_pop_buf[POP_MAX_BYTES / 2]; /* only touched in iso callbacks */
 
 /* connect/disconnect handshake from the client callback to the setup task */
@@ -384,9 +389,8 @@ static void ctrl_done_cb(usb_transfer_t *t) {
 /* Blocking control transfer on EP0. MUST be called from a task other than the
  * USB client task (that task dispatches this transfer's completion callback).
  */
-static esp_err_t ctrl_xfer_sync(uint8_t reqtype, uint8_t req, uint16_t val,
-                                uint16_t idx, const uint8_t *data,
-                                uint16_t len) {
+static esp_err_t ctrl_xfer_locked(uint8_t reqtype, uint8_t req, uint16_t val,
+                                  uint16_t idx, uint8_t *data, uint16_t len) {
   usb_transfer_t *x = NULL;
   uint16_t buflen = len ? len : 1;
   if (usb_host_transfer_alloc(8 + buflen, 0, &x) != ESP_OK) {
@@ -412,9 +416,29 @@ static esp_err_t ctrl_xfer_sync(uint8_t reqtype, uint8_t req, uint16_t val,
       e = ESP_ERR_TIMEOUT;
     } else {
       e = (x->status == USB_TRANSFER_STATUS_COMPLETED) ? ESP_OK : ESP_FAIL;
+      if (e == ESP_OK && (reqtype & 0x80) && data && len &&
+          x->actual_num_bytes > 8) {
+        /* Device-to-host: the payload follows the 8-byte setup packet. */
+        size_t got = (size_t)x->actual_num_bytes - 8;
+        memcpy(data, x->data_buffer + 8, got < len ? got : len);
+      }
     }
   }
   usb_host_transfer_free(x);
+  return e;
+}
+
+/* Control transfers are serialised: the setup task and the volume control
+ * (called from any task) share one completion semaphore. */
+static esp_err_t ctrl_xfer_sync(uint8_t reqtype, uint8_t req, uint16_t val,
+                                uint16_t idx, uint8_t *data, uint16_t len) {
+  if (!s_ctrl_lock ||
+      xSemaphoreTake(s_ctrl_lock, pdMS_TO_TICKS(3000)) != pdTRUE) {
+    return ESP_ERR_TIMEOUT;
+  }
+  esp_err_t e = s_dev ? ctrl_xfer_locked(reqtype, req, val, idx, data, len)
+                      : ESP_ERR_INVALID_STATE;
+  xSemaphoreGive(s_ctrl_lock);
   return e;
 }
 
@@ -440,11 +464,130 @@ static esp_err_t uac_fu_set_mute(uint8_t fu_id, bool mute) {
                         (uint16_t)((fu_id << 8) | s_ac_iface), &d, 1);
 }
 
-static esp_err_t uac_fu_set_volume_db(uint8_t fu_id, int16_t db_q8) {
+/* ── Volume ────────────────────────────────────────────────────────────────
+ * The volume starts LOW (CONFIG_USB_AUDIO_INITIAL_VOLUME_PERCENT) every boot
+ * and is applied before the stream starts, so a speaker can never blast at
+ * full volume.  A 0-100 % value is mapped onto the top VOLUME_RANGE_DB of the
+ * device's own Feature Unit range (UAC ranges often reach -127 dB, which would
+ * leave most of a slider silent).  Devices without a Feature Unit volume get
+ * the same curve as a digital gain on the PCM instead. */
+#define VOLUME_RANGE_DB 60
+
+typedef struct {
+  uint8_t id;
+  uint8_t mode; /* 0 = no volume control, 1 = master, 2 = per channel */
+  int16_t min, max, res; /* 1/256 dB units, as in the UAC descriptors */
+} fu_vol_t;
+
+static fu_vol_t s_fu_vol[sizeof(s_fu_ids)];
+static volatile int s_volume_pct = CONFIG_USB_AUDIO_INITIAL_VOLUME_PERCENT;
+static volatile bool s_hw_volume;      /* some Feature Unit has a volume */
+static volatile int32_t s_sw_gain_q15; /* 32768 = unity */
+
+static esp_err_t uac_fu_set_volume(uint8_t fu_id, uint8_t channel,
+                                   int16_t db_q8) {
   uint8_t d[2] = {(uint8_t)db_q8, (uint8_t)(db_q8 >> 8)};
-  /* VOLUME_CONTROL (0x02), channel 0 (master) */
-  return ctrl_xfer_sync(0x21, 0x01, 0x0200,
+  /* VOLUME_CONTROL (0x02); channel 0 = master */
+  return ctrl_xfer_sync(0x21, 0x01, (uint16_t)(0x0200 | channel),
                         (uint16_t)((fu_id << 8) | s_ac_iface), d, 2);
+}
+
+static int16_t le16(const uint8_t *p) {
+  return (int16_t)(uint16_t)(p[0] | (p[1] << 8));
+}
+
+/* Volume range of one channel of a Feature Unit.  UAC2 has a single RANGE
+ * request; UAC1 has separate GET_MIN / GET_MAX / GET_RES. */
+static esp_err_t uac_fu_get_range(uint8_t fu_id, uint8_t channel, int16_t *mn,
+                                  int16_t *mx, int16_t *rs) {
+  uint16_t val = (uint16_t)(0x0200 | channel);
+  uint16_t idx = (uint16_t)((fu_id << 8) | s_ac_iface);
+  if (s_uac_ver == 2) {
+    uint8_t d[8] = {0}; /* wNumSubRanges, then MIN, MAX, RES of the first */
+    esp_err_t e = ctrl_xfer_sync(0xA1, 0x02, val, idx, d, sizeof(d));
+    if (e != ESP_OK) {
+      return e;
+    }
+    if (d[0] == 0 && d[1] == 0) {
+      return ESP_ERR_NOT_FOUND;
+    }
+    *mn = le16(d + 2);
+    *mx = le16(d + 4);
+    *rs = le16(d + 6);
+  } else {
+    static const uint8_t req[3] = {0x82, 0x83, 0x84}; /* GET_MIN/MAX/RES */
+    int16_t v[3];
+    for (int i = 0; i < 3; i++) {
+      uint8_t b[2] = {0, 0};
+      esp_err_t e = ctrl_xfer_sync(0xA1, req[i], val, idx, b, sizeof(b));
+      if (e != ESP_OK) {
+        return e;
+      }
+      v[i] = le16(b);
+    }
+    *mn = v[0];
+    *mx = v[1];
+    *rs = v[2];
+  }
+  if (*mx <= *mn) {
+    return ESP_ERR_NOT_SUPPORTED;
+  }
+  if (*rs <= 0) {
+    *rs = 1;
+  }
+  return ESP_OK;
+}
+
+/* 0..100 % -> Feature Unit value, snapped to the device's step size. */
+static int16_t volume_value(const fu_vol_t *f, int pct) {
+  int range = f->max - f->min;
+  int window = VOLUME_RANGE_DB * 256;
+  int lo = f->max - (range < window ? range : window);
+  int v = lo + (int)(((int64_t)(f->max - lo) * pct) / 100);
+  v = f->min + ((v - f->min + f->res / 2) / f->res) * f->res;
+  if (v > f->max) {
+    v = f->max;
+  }
+  if (v < f->min) {
+    v = f->min;
+  }
+  return (int16_t)v;
+}
+
+/* Push the current volume to every Feature Unit.  0 % also mutes. */
+static void volume_apply_hw(void) {
+  int pct = s_volume_pct;
+  for (int i = 0; i < s_fu_count; i++) { /* volume first, then (un)mute */
+    const fu_vol_t *f = &s_fu_vol[i];
+    if (f->mode == 1) {
+      uac_fu_set_volume(f->id, 0, volume_value(f, pct));
+    } else if (f->mode == 2) {
+      uac_fu_set_volume(f->id, 1, volume_value(f, pct));
+      uac_fu_set_volume(f->id, 2, volume_value(f, pct));
+    }
+  }
+  for (int i = 0; i < s_fu_count; i++) {
+    uac_fu_set_mute(s_fu_ids[i], pct == 0);
+  }
+}
+
+/* Digital gain used when the device has no volume control of its own. */
+static void volume_update_sw_gain(void) {
+  int pct = s_volume_pct;
+  if (s_hw_volume || pct >= 100) {
+    s_sw_gain_q15 = 32768;
+  } else if (pct <= 0) {
+    s_sw_gain_q15 = 0;
+  } else {
+    float db = -(float)VOLUME_RANGE_DB * (float)(100 - pct) / 100.0f;
+    s_sw_gain_q15 = (int32_t)(32768.0f * powf(10.0f, db / 20.0f));
+  }
+}
+
+/* "-12.5" style text for logs (avoids float printf). */
+static void fmt_db(char *buf, size_t n, int16_t q8) {
+  int t = q8 * 10 / 256; /* tenths of a dB */
+  snprintf(buf, n, "%s%d.%d", t < 0 ? "-" : "", abs(t) / 10, abs(t) % 10);
 }
 
 static esp_err_t uac_mixer_set_db(uint8_t mixer_id, uint8_t in_ch,
@@ -514,13 +657,44 @@ static void setup_device(uint8_t addr) {
              esp_err_to_name(er));
   }
 
-  /* 3) Unmute every Feature Unit and set 0 dB.  Failures are normal (many
-   * units lack mute/volume controls) and are only logged. */
+  /* 3) Volume.  Find which Feature Units have a volume control, set the LOW
+   * initial volume, then unmute.  (This used to set 0 dB, which is the maximum
+   * on most devices.)  Missing mute/volume controls are normal and only
+   * logged. */
+  s_hw_volume = false;
   for (int i = 0; i < s_fu_count; i++) {
-    esp_err_t em = uac_fu_set_mute(s_fu_ids[i], false);
-    uac_fu_set_volume_db(s_fu_ids[i], 0);
-    ESP_LOGI(TAG, "FU %u unmute: %s", s_fu_ids[i], esp_err_to_name(em));
+    fu_vol_t *f = &s_fu_vol[i];
+    memset(f, 0, sizeof(*f));
+    f->id = s_fu_ids[i];
+    int16_t mn = 0;
+    int16_t mx = 0;
+    int16_t rs = 0;
+    if (uac_fu_get_range(f->id, 0, &mn, &mx, &rs) == ESP_OK) {
+      f->mode = 1;
+    } else if (uac_fu_get_range(f->id, 1, &mn, &mx, &rs) == ESP_OK) {
+      f->mode = 2;
+    }
+    if (f->mode) {
+      f->min = mn;
+      f->max = mx;
+      f->res = rs;
+      s_hw_volume = true;
+      char a[12];
+      char b[12];
+      char c[12];
+      fmt_db(a, sizeof(a), mn);
+      fmt_db(b, sizeof(b), mx);
+      fmt_db(c, sizeof(c), rs);
+      ESP_LOGI(TAG, "FU %u volume (%s): %s .. %s dB, step %s dB", f->id,
+               f->mode == 1 ? "master" : "per channel", a, b, c);
+    } else {
+      ESP_LOGI(TAG, "FU %u has no volume control", f->id);
+    }
   }
+  volume_update_sw_gain();
+  volume_apply_hw();
+  ESP_LOGI(TAG, "Volume %d%% (%s)", (int)s_volume_pct,
+           s_hw_volume ? "device volume" : "digital gain");
 
   /* 3b) Route USB stereo through a mixer unit, if there is one. */
   if (s_mixer_id) {
@@ -547,6 +721,8 @@ static void setup_device(uint8_t addr) {
   return;
 
 fail_close:
+  s_hw_volume = false;
+  volume_update_sw_gain();
   usb_host_device_close(s_client, s_dev);
   s_dev = NULL;
 }
@@ -554,6 +730,8 @@ fail_close:
 static void teardown_device(void) {
   s_iso_running = false;
   s_primed = false;
+  s_hw_volume = false;
+  volume_update_sw_gain();
   vTaskDelay(pdMS_TO_TICKS(5)); /* let in-flight callbacks settle */
   for (int i = 0; i < NUM_URBS; i++) {
     if (s_urb[i]) {
@@ -627,7 +805,10 @@ esp_err_t audio_output_init(void) {
 
   s_pcm = xStreamBufferCreate(FIFO_BYTES, 1);
   s_ctrl_sem = xSemaphoreCreateBinary();
-  ESP_RETURN_ON_FALSE(s_pcm && s_ctrl_sem, ESP_ERR_NO_MEM, TAG, "no memory");
+  s_ctrl_lock = xSemaphoreCreateMutex();
+  ESP_RETURN_ON_FALSE(s_pcm && s_ctrl_sem && s_ctrl_lock, ESP_ERR_NO_MEM, TAG,
+                      "no memory");
+  volume_update_sw_gain(); /* start quiet even before a DAC is attached */
 
   usb_host_vbus_enable();
   const usb_host_config_t host_cfg = {
@@ -658,9 +839,48 @@ size_t audio_output_write(const int16_t *pcm, size_t frames) {
     s_overruns++;
   }
   if (n > 0) {
-    n = xStreamBufferSend(sb, pcm, n, 0);
+    int32_t gain = s_sw_gain_q15;
+    if (gain >= 32768) {
+      n = xStreamBufferSend(sb, pcm, n, 0);
+    } else { /* no device volume control: scale the samples ourselves */
+      int16_t tmp[128];
+      size_t done = 0;
+      while (done < n) {
+        size_t chunk = n - done;
+        if (chunk > sizeof(tmp)) {
+          chunk = sizeof(tmp);
+        }
+        const int16_t *src = (const int16_t *)((const uint8_t *)pcm + done);
+        for (size_t i = 0; i < chunk / 2; i++) {
+          tmp[i] = (int16_t)(((int32_t)src[i] * gain) >> 15);
+        }
+        size_t sent = xStreamBufferSend(sb, tmp, chunk, 0);
+        done += sent;
+        if (sent < chunk) {
+          break;
+        }
+      }
+      n = done;
+    }
   }
   return n / 4;
+}
+
+void audio_output_set_volume_percent(int percent) {
+  if (percent < 0) {
+    percent = 0;
+  } else if (percent > 100) {
+    percent = 100;
+  }
+  s_volume_pct = percent;
+  volume_update_sw_gain();
+  if (s_hw_volume && s_iso_running) {
+    volume_apply_hw();
+  }
+}
+
+int audio_output_get_volume_percent(void) {
+  return s_volume_pct;
 }
 
 void audio_output_flush(void) {
@@ -681,4 +901,6 @@ void audio_output_get_stats(audio_output_stats_t *stats) {
   stats->fill_bytes = sb ? (uint32_t)xStreamBufferBytesAvailable(sb) : 0;
   stats->overruns = s_overruns;
   stats->underruns = s_underruns;
+  stats->volume_percent = (uint8_t)s_volume_pct;
+  stats->hw_volume = s_hw_volume;
 }

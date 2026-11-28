@@ -27,7 +27,7 @@
 #include "freertos/stream_buffer.h"
 #include "freertos/task.h"
 #include "stations.h"
-#include "wifi_sta.h"
+#include "wifi_manager.h"
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -319,7 +319,7 @@ static void net_task(void *arg) {
   bool first = true;
 
   while (true) {
-    if (!wifi_sta_is_connected()) {
+    if (!wifi_manager_is_connected()) {
       vTaskDelay(pdMS_TO_TICKS(500));
       continue;
     }

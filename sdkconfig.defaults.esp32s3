@@ -10,7 +10,5 @@ CONFIG_OUTPUT_SAMPLE_RATE_HZ=48000
 # GPIO that enables 5 V on the USB host VBUS, -1 if the board powers it itself.
 CONFIG_USB_HOST_VBUS_EN_GPIO=-1
 
-# Wi-Fi credentials. Prefer setting these in menuconfig or in your own
-# (git-ignored) sdkconfig rather than committing them here.
-CONFIG_RADIO_WIFI_SSID="VSOL-D3AD"
-CONFIG_RADIO_WIFI_PASSWORD="12345678"
+# Wi-Fi is set up from the web page (open the "WebRadio" network on first boot);
+# credentials are stored in the device's flash, not in this file.

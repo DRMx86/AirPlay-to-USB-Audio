@@ -41,10 +41,7 @@ jobs:
           if [ -f sdkconfig ]; then echo ">> using committed sdkconfig"; else echo ">> no sdkconfig, using defaults"; fi
           idf.py build
           echo ">> Web radio / USB audio settings used by this build:"
-          grep -nE "^CONFIG_(RADIO_|OUTPUT_SAMPLE|USB_AUDIO_)" sdkconfig || true
-          if ! grep -qE '^CONFIG_RADIO_WIFI_SSID="[^"]+"' sdkconfig; then
-            echo "::warning::No Wi-Fi SSID in sdkconfig: this image cannot join a network. Set it in menuconfig and build locally."
-          fi
+          grep -nE "^CONFIG_(RADIO_|WIFI_|OUTPUT_SAMPLE|USB_AUDIO_)" sdkconfig || true
           # One image flashable at 0x0.
           idf.py merge-bin
           ls -la build/*.bin

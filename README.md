@@ -24,7 +24,7 @@ UI and display code has been removed. The USB host backend comes from `main`. Se
 - **5 V on the native USB port's VBUS.** The dongle must be powered. If your board does not
   supply 5 V there, power it externally, or switch it with a GPIO via
   `CONFIG_USB_HOST_VBUS_EN_GPIO`.
-- A Wi-Fi network (2.4 GHz) with internet access.
+- A Wi-Fi network (2.4 GHz) with internet access. It is set up from your phone, see below.
 - Optional: a push button between a GPIO and GND to switch stations (`menuconfig`).
 
 The native USB port is taken over by the USB host, so **flash and monitor through the
@@ -52,13 +52,14 @@ With a button configured, each press switches to the next station. In code, call
 
 ## Build and flash
 
-**Set your Wi-Fi credentials first** (see Configuration below). PlatformIO:
+No Wi-Fi details go into the firmware: the radio asks for them on first boot (see
+**Wi-Fi setup** below). PlatformIO:
 
 ```bash
 git clone --recursive https://github.com/DRMx86/AirPlay-to-USB-Audio
 cd AirPlay-to-USB-Audio
 git checkout webradio-to-USB-Audio
-pio run -e esp32s3 -t menuconfig     # Web Radio to USB DAC Audio -> Wi-Fi
+pio run -e esp32s3 -t menuconfig     # optional: Web Radio to USB DAC Audio
 pio run -e esp32s3 -t upload
 pio run -e esp32s3 -t monitor
 ```
@@ -78,11 +79,51 @@ This repository commits a generated `sdkconfig`, and it takes precedence over th
 `sdkconfig.defaults*` files. If you built an earlier version in the same checkout and the
 component manager complains, delete `managed_components/` (and `dependencies.lock`).
 
-**Credentials and CI builds:** the Wi-Fi name and password are compiled into the firmware. The
-GitHub Actions workflow for this branch (`.github/workflows/webradio-usb-dac-build.yml`, artifact
-`webradio-usb-dac-esp32s3-firmware`) builds from the committed `sdkconfig`, so a CI-built image has no Wi-Fi
-credentials unless you commit them, which you should not do in a public repository. Build and
-flash locally with your own settings instead.
+The GitHub Actions workflow for this branch (`.github/workflows/webradio-usb-dac-build.yml`,
+artifact `webradio-usb-dac-esp32s3-firmware`) builds from the committed `sdkconfig`. Because Wi-Fi
+is set up on the device, a CI-built image works like a local one.
+
+## Wi-Fi setup
+
+On first boot (or whenever the saved network cannot be reached) the radio opens its own Wi-Fi
+network called **WebRadio**:
+
+1. On your phone or laptop, join the **WebRadio** network. The setup page opens by itself; if it
+   does not, go to **http://192.168.4.1/**.
+2. Pick your home network, enter its password and tap **Connect**.
+3. The page confirms and shows the radio's new address. Switch your phone back to your normal
+   Wi-Fi. The setup network closes a few seconds later and the radio starts playing.
+
+The network is saved in the device's flash and used on every boot. If it cannot be joined after
+`WIFI_MAX_RETRY` attempts at boot, the WebRadio network opens again (and the saved network is
+retried every 5 minutes while nobody is using the page). Once the radio is on your network, the
+same page is available at its IP address (shown in the serial log and on the page) to change or
+**forget** the network. Use "Other network..." for a hidden network.
+
+The setup page is dark and minimal, works offline (no internet is needed to load it) and has no
+login. Anyone on the same network, or near the radio while its setup network is open, can use it,
+so set `WIFI_AP_PASSWORD` in `menuconfig` if that matters to you.
+
+## Volume
+
+The volume **starts low at every boot** (default 10 %) and is applied *before* any audio is sent,
+so a speaker can never blast at full volume when you plug it in. (An earlier version set every USB
+volume control to 0 dB, which is the maximum on most devices, and that is what made the speaker
+loud.) You can then raise it:
+
+- **From the web page** at the radio's IP address: the slider changes the speaker's own USB
+  volume control (UAC Feature Unit). The percentage covers the top 60 dB of the device's range,
+  so the whole slider is usable. 0 % mutes.
+- **If the speaker has no USB volume control**, the same slider applies a digital gain to the
+  samples instead. The page says which one is in use.
+- **With the speaker's own buttons**: those change the speaker's amplifier, independent of this
+  setting. Whether they also move the USB volume depends on the speaker, and the radio does not
+  read it back, so the slider may not follow them. When a speaker is plugged in, the serial log
+  prints the volume range it reports (`FU 5 volume (master): -91.0 .. 0.0 dB, step 1.0 dB`), which
+  shows how the speaker (such as a JBL Charge) exposes it.
+
+The volume you set is kept until the next reboot, and re-applied if you unplug and replug the
+speaker. Change the boot default with `USB_AUDIO_INITIAL_VOLUME_PERCENT` in `menuconfig`.
 
 ## Configuration
 
@@ -90,12 +131,15 @@ flash locally with your own settings instead.
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| Wi-Fi SSID / password | empty | Required. Leave the password empty for an open network. |
+| Setup access point name | WebRadio | Name of the setup network. |
+| Setup access point password | empty | Empty = open setup network; 8-63 characters = WPA2. |
+| Connection attempts before the portal | 5 | How often the saved network is tried at boot first. |
 | Stream buffer size | 128 KB | Compressed audio buffered in PSRAM; about 8 s at 128 kbit/s. Rides out Wi-Fi dropouts. |
 | Buffer before playback | 32 KB | Playback starts once this much is buffered. |
 | Network timeout | 10 s | The player reconnects after three consecutive read timeouts. |
 | Next-station button GPIO | -1 | Button to GND, internal pull-up. |
 | USB DAC sample rate | 48 kHz | Rate sent to the dongle. Streams at other rates (usually 44.1 kHz) are resampled to it. |
+| Initial volume | 10 % | Volume at every boot / plug-in. 0 starts muted. |
 | USB FIFO size | 60 ms | Buffer between the decoder and the USB transfers. |
 | USB prefill | 20 ms | Audio buffered before the dongle is fed; sets the USB-side latency. |
 | VBUS enable GPIO | -1 | GPIO that switches 5 V onto the host port, if your board has one. |
@@ -109,8 +153,10 @@ that setting only plays 44.1 kHz streams correctly.
  net task ──▶ byte buffer (PSRAM) ──▶ decoder task ──▶ USB FIFO ──▶ isochronous OUT ──▶ DAC
 ```
 
-- `main/net/wifi_sta.c` — Wi-Fi station with automatic reconnect; power save is off to avoid
-  latency spikes.
+- `main/net/wifi_manager.c` — saved network first, setup access point + captive portal when
+  that fails; credentials in NVS; automatic reconnect; power save is off to avoid latency spikes.
+  `captive_dns.c` answers every DNS query with the radio's address so phones open the page by
+  themselves; `portal.html` is the page (embedded in the firmware, no external files).
 - `main/radio/radio_player.c` — the **network task** opens the stream with `Icy-MetaData: 1`,
   follows redirects, strips the interleaved metadata (and logs the current track title) and
   fills the byte buffer. The **decoder task** feeds the buffer to the `esp_audio_codec` simple
@@ -136,11 +182,17 @@ alt-settings and the UAC version found, which is useful if a particular dongle d
 ## Status
 
 **Not yet built or run on hardware.** The sandbox this was written in could not reach the ESP-IDF
-toolchain, so only the following was checked: the new code compiles cleanly with
-`-Wall -Wextra` against the real `esp_audio_codec` headers (with stubs for the ESP-IDF APIs), and
-the ICY metadata splitting and codec detection pass a host-side test at many chunk sizes. A real
-`idf.py build`, a listening test with your dongle, and checking the stream's actual codec and
-sample rate are still to do. Expect to fix small build issues on the first compile.
+toolchain, so only the following was checked:
+
+- the new code compiles cleanly with `-Wall -Wextra` against the real `esp_audio_codec` and USB
+  host headers (with stubs for the rest of ESP-IDF);
+- host-side tests pass for the ICY metadata splitter, the DNS responder, the form parser, JSON
+  escaping, the volume mapping, reading a volume range over UAC 1.0 and UAC 2.0 control requests,
+  and the digital-gain path;
+- the setup page was rendered in a browser against a mocked device.
+
+A real `idf.py build`, the Wi-Fi setup flow on a phone, and a listening test with your speaker are
+still to do. Expect to fix small build issues on the first compile.
 
 ## Legal
 

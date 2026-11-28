@@ -8,7 +8,7 @@
 #include "audio_output.h"
 #include "iot_board.h"
 #include "radio_player.h"
-#include "wifi_sta.h"
+#include "wifi_manager.h"
 
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -28,8 +28,8 @@ static void log_stats(void) {
   ESP_LOGI(TAG,
            "Wi-Fi: %s | Radio: \"%s\" %s, %s %lu Hz %uch, net buffer %lu%%, "
            "reconnects %lu, decode errors %lu | USB DAC: %s, buffer %lu%%, "
-           "overruns %lu, underruns %lu",
-           wifi_sta_is_connected() ? "connected" : "down", radio.station,
+           "volume %u%%, overruns %lu, underruns %lu",
+           wifi_manager_state_name(wifi_manager_get_state()), radio.station,
            radio.streaming ? "streaming" : "idle", radio.codec,
            (unsigned long)radio.sample_rate, radio.channels,
            (unsigned long)(radio.capacity_bytes
@@ -42,7 +42,8 @@ static void log_stats(void) {
            (unsigned long)(out.capacity_bytes
                                ? out.fill_bytes * 100 / out.capacity_bytes
                                : 0),
-           (unsigned long)out.overruns, (unsigned long)out.underruns);
+           out.volume_percent, (unsigned long)out.overruns,
+           (unsigned long)out.underruns);
 }
 
 #if CONFIG_RADIO_NEXT_BUTTON_GPIO >= 0
@@ -80,9 +81,9 @@ void app_main(void) {
   /* USB first so the host can start enumerating while Wi-Fi comes up. */
   ESP_ERROR_CHECK(audio_output_init());
 
-  err = wifi_sta_start();
+  err = wifi_manager_start();
   if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Wi-Fi start failed: %s", esp_err_to_name(err));
+    ESP_LOGE(TAG, "Wi-Fi manager start failed: %s", esp_err_to_name(err));
   }
 
   err = radio_player_start();

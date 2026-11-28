@@ -22,6 +22,9 @@ typedef struct {
   uint32_t capacity_bytes; /* total ring buffer size */
   uint32_t overruns;       /* times the buffer was full and audio was dropped */
   uint32_t underruns;      /* times the host asked for data we did not have */
+  uint8_t volume_percent;  /* current volume, 0-100 */
+  bool hw_volume;          /* true: the DAC's own volume control is used;
+                              false: digital gain on the samples */
 } audio_output_stats_t;
 
 /**
@@ -45,6 +48,22 @@ size_t audio_output_write(const int16_t *pcm, size_t frames);
  * Drop all buffered audio and re-prime before streaming again.
  */
 void audio_output_flush(void);
+
+/**
+ * Set the output volume, 0-100 %.  0 mutes.
+ *
+ * Uses the DAC's own Feature Unit volume when it has one, otherwise a digital
+ * gain.  The value starts at CONFIG_USB_AUDIO_INITIAL_VOLUME_PERCENT at every
+ * boot (so nothing is ever blasted at full volume) and is re-applied whenever
+ * a DAC is plugged in.  Safe to call from any task; it may block for a few
+ * milliseconds while talking to the DAC.
+ */
+void audio_output_set_volume_percent(int percent);
+
+/**
+ * @return the current volume, 0-100
+ */
+int audio_output_get_volume_percent(void);
 
 /**
  * Snapshot of buffer state and error counters.
