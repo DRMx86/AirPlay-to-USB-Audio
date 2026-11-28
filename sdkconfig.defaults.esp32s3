@@ -12,5 +12,5 @@ CONFIG_USB_HOST_VBUS_EN_GPIO=-1
 
 # Wi-Fi credentials. Prefer setting these in menuconfig or in your own
 # (git-ignored) sdkconfig rather than committing them here.
-# CONFIG_RADIO_WIFI_SSID="VSOL-D3AD"
-# CONFIG_RADIO_WIFI_PASSWORD="12345678"
+# CONFIG_RADIO_WIFI_SSID="my-network"
+# CONFIG_RADIO_WIFI_PASSWORD="my-password"
