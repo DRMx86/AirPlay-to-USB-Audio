@@ -1,6 +1,8 @@
 set(SRC_FILES
     "main.c"
-    "audio/audio_input_i2s.c"
+    "net/wifi_sta.c"
+    "radio/radio_player.c"
+    "radio/stations.c"
     "audio/audio_output_usb_host.c"
     "audio/audio_resample.c"
 )
@@ -8,17 +10,25 @@ set(SRC_FILES
 set(INC_DIRS
     "."
     "audio"
+    "net"
+    "radio"
 )
 
 set(DEPS
     driver
-    esp_driver_i2s
     esp_driver_gpio
-    esp_ringbuf
     esp_timer
+    esp_wifi
+    esp_netif
+    esp_event
+    esp_http_client
+    esp-tls
+    mbedtls
+    nvs_flash
     boards
     audio-resampler
     usb
+    espressif__esp_audio_codec
 )
 
 idf_component_register(

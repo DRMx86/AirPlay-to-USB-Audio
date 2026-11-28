@@ -33,8 +33,8 @@ jobs:
           export IDF_COMPONENT_CHECK_NEW_VERSION=0
           if [ -f sdkconfig ]; then echo ">> using committed sdkconfig"; else echo ">> no sdkconfig, using defaults"; fi
           idf.py build
-          echo ">> I2S input / USB audio settings used by this build:"
-          grep -nE "^CONFIG_(I2S_IN|UAC_|OUTPUT_SAMPLE)" sdkconfig || true
+          echo ">> Web radio / USB audio settings used by this build:"
+          grep -nE "^CONFIG_(RADIO_|UAC_|OUTPUT_SAMPLE)" sdkconfig || true
           # One image flashable at 0x0 (built from this project's own flash settings).
           idf.py merge-bin
           ls -la build/*.bin
@@ -54,7 +54,7 @@ jobs:
             dependencies.lock; do
             if [ -f "$f" ]; then cp "$f" out/; else echo "missing: $f"; fi
           done
-          [ -f out/merged-binary.bin ] && mv out/merged-binary.bin out/merged-i2s-usb-audio-esp32s3.bin
+          [ -f out/merged-binary.bin ] && mv out/merged-binary.bin out/merged-webradio-usb-audio-esp32s3.bin
           ls -la out
 
       - name: Upload artifacts
@@ -77,4 +77,4 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/merged-i2s-usb-audio-esp32s3.bin
+          files: dist/merged-webradio-usb-audio-esp32s3.bin

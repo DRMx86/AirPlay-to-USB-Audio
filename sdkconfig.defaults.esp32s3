@@ -5,21 +5,12 @@ CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 CONFIG_SPIRAM_MODE_OCT=y
 
 # USB DAC output (ESP32-S3 is the USB host; UAC 1.0 and 2.0 dongles).
-# Must equal the I2S input rate, or use 44.1 kHz in / 48 kHz out.
+# Radio streams at other rates (usually 44.1 kHz) are resampled to this rate.
 CONFIG_OUTPUT_SAMPLE_RATE_HZ=48000
 # GPIO that enables 5 V on the USB host VBUS, -1 if the board powers it itself.
 CONFIG_USB_HOST_VBUS_EN_GPIO=-1
 
-# I2S input (see main/Kconfig.projbuild for all options)
-#   Slave mode: the external source drives BCK and WS.
-#   Wiring (ESP32-S3):  source BCK -> GPIO4, source WS/LRCK -> GPIO5,
-#                       source data -> GPIO6, common GND.
-CONFIG_I2S_IN_ROLE_SLAVE=y
-CONFIG_I2S_IN_RATE_48000=y
-CONFIG_I2S_IN_SLOT_32BIT=y
-CONFIG_I2S_IN_FORMAT_PHILIPS=y
-CONFIG_I2S_IN_BCK_IO=4
-CONFIG_I2S_IN_WS_IO=5
-CONFIG_I2S_IN_DIN_IO=6
-CONFIG_I2S_IN_MCLK_IO=-1
-
+# Wi-Fi credentials. Prefer setting these in menuconfig or in your own
+# (git-ignored) sdkconfig rather than committing them here.
+# CONFIG_RADIO_WIFI_SSID="my-network"
+# CONFIG_RADIO_WIFI_PASSWORD="my-password"

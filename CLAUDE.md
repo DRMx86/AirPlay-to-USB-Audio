@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-I2S-to-USB-DAC — firmware that takes an I2S input (e.g. from a Bluetooth audio board) and plays it on a USB DAC dongle. The ESP32-S3 is the USB **host** (native USB port); UAC 1.0 and UAC 2.0 dongles are supported. Derived from the airplay-esp32 project; on `main` the source is AirPlay, here it is I2S, and AirPlay, Bluetooth, WiFi/Ethernet, web UI, displays and buttons were removed.
+Web Radio to USB DAC — firmware that streams an Icecast web radio (MP3 or AAC, HTTP or HTTPS) over Wi-Fi and plays it on a USB DAC dongle. The ESP32-S3 is the USB **host** (native USB port); UAC 1.0 and UAC 2.0 dongles are supported. Derived from the airplay-esp32 project; on `main` the source is AirPlay, here it is a web radio stream, and AirPlay, Bluetooth, Ethernet, web UI, displays and buttons were removed.
 
 ## Build & Flash
 
@@ -29,13 +29,18 @@ Build environments: `esp32s3` (default) and `esp32s3-jtag`. Sdkconfig defaults a
 
 ```
 main/
-├── main.c                    # app_main: board init, USB host output, I2S input, 5 s status log
-├── Kconfig.projbuild         # "I2S to USB DAC Audio" menu (I2S role/rate/pins, USB DAC rate, FIFO sizes, VBUS GPIO)
+├── main.c                    # app_main: board init, USB host output, Wi-Fi, radio player, 5 s status log
+├── Kconfig.projbuild         # "Web Radio to USB DAC Audio" menu (Wi-Fi, stream buffers, button, USB DAC rate, FIFO sizes, VBUS GPIO)
+├── idf_component.yml         # espressif/esp_audio_codec (MP3/AAC decoders)
+├── net/
+│   └── wifi_sta.c/.h         # Wi-Fi station, auto reconnect, power save off
+├── radio/
+│   ├── stations.c/.h         # station table (add stations here; first entry plays at boot)
+│   └── radio_player.c/.h     # net task (HTTP(S) + ICY metadata) -> byte buffer -> decoder task -> USB output
 └── audio/
-    ├── audio_input_i2s.c/.h  # I2S RX channel + capture task (slave/master, 16/32-bit slots)
     ├── audio_output_usb_host.c # native USB host UAC 1.0/2.0 streamer (descriptor parse, clock/rate setup, iso OUT)
     ├── audio_output.h        # output API: init / write / flush / stats
-    └── audio_resample.c/.h   # sinc resampler wrapper (44.1 -> 48 kHz when configured)
+    └── audio_resample.c/.h   # sinc resampler wrapper (stream rate -> USB rate)
 
 components/
 ├── boards/                   # Board support (esp32-generic, esp32s2/s3-generic, waveshare-esp32p4)
@@ -48,11 +53,15 @@ components/
 
 ## Key Conventions
 
-- **Data path**: I2S RX (DMA) -> capture task (`i2s_capture`, core 1, prio 7) -> `audio_output_write()` -> stream-buffer FIFO -> isochronous OUT transfer callbacks (USB client task, core 0) -> USB DAC dongle.
-- **Format**: the FIFO is always 16-bit stereo at `CONFIG_OUTPUT_SAMPLE_RATE_HZ`; it is expanded to 24/32-bit in the iso callback if the dongle only offers wider slots. 32-bit I2S slots are truncated to the top 16 bits. Only 44.1 -> 48 kHz resampling exists, so I2S rate and USB rate must be equal or 44.1 in / 48 out.
-- **Drift handling**: `audio_output_write()` never blocks; when the FIFO is full the excess frames are dropped (overrun). On underrun the iso callback sends silence and waits for `CONFIG_USB_AUDIO_PRIME_MS` of audio before resuming.
+- **Data path**: `net_task` (core 0, prio 5) reads the HTTP body, strips ICY metadata and pushes bytes into a PSRAM stream buffer -> `dec_task` (core 1, prio 6) decodes with the `esp_audio_codec` simple decoder -> mono->stereo and resample if needed -> `audio_output_write()` -> stream-buffer FIFO -> isochronous OUT transfer callbacks (USB client task, core 0) -> USB DAC dongle.
+- **Format**: the USB FIFO is always 16-bit stereo at `CONFIG_OUTPUT_SAMPLE_RATE_HZ`; it is expanded to 24/32-bit in the iso callback if the dongle only offers wider slots. Keep the output rate at 48000: the resampler wrapper is compiled out when the output is 44100, so the player refuses other stream rates in that case.
+- **Backpressure**: `audio_output_write()` never blocks and drops on overflow, so `dec_task` checks the FIFO free space (`audio_output_get_stats`) and waits. That stalls the byte buffer and TCP, so the server is read at playback speed. With no DAC connected the audio is discarded at real-time speed.
+- **Station / stream changes**: `radio_player_select()` bumps `s_select_gen`; the net task then calls `flush_decoder()` (bumps `s_gen`, waits for `s_dec_gen` ack) so the decoder drops its state, buffered bytes and queued USB audio. A plain reconnect to the same station does not flush; the decoder's parser resyncs by itself.
+- **Reconnects**: failures back off 1 s -> 10 s; after three consecutive read timeouts (`CONFIG_RADIO_HTTP_TIMEOUT_MS` each) the stream is reopened.
+- **Stream support**: MP3 and AAC (ADTS) only, chosen from `Content-Type` (missing type defaults to MP3). Ogg and old Shoutcast v1 (`ICY 200 OK`) are unsupported.
 - **USB host**: ESP32-S3 USB is full-speed only. The native USB port is taken over by the host, so flash/monitor via the UART port. UAC 2.0: rate set on every Clock Source entity before selecting the alt; UAC 1.0: rate set on the endpoint after SET_INTERFACE. `usb_host_interface_claim()` does not send SET_INTERFACE; the explicit control transfer is required.
-- **Host-side tests**: the descriptor parser and packet sizing can be tested on a PC by `#include`-ing `audio_output_usb_host.c` into a test with stubbed FreeRTOS/USB calls (real `usb/*.h` headers from ESP-IDF).
+- **Committed sdkconfig**: `sdkconfig` is tracked (despite `.gitignore`), uses CRLF line endings and overrides `sdkconfig.defaults*`. When changing defaults, change it too and keep its line endings. CI builds from it, so it has no Wi-Fi credentials.
+- **Host-side tests**: the descriptor parser and packet sizing can be tested on a PC by `#include`-ing `audio_output_usb_host.c` into a test with stubbed FreeRTOS/USB calls (real `usb/*.h` headers from ESP-IDF). The same trick works for `radio_player.c` (ICY splitting, content-type mapping) with stubbed FreeRTOS/HTTP/codec calls.
 - **Component structure**: Each component has its own `CMakeLists.txt` with `idf_component_register()`.
 - **Git submodules**: `u8g2` and `u8g2-hal-esp-idf` are still declared as submodules — clone with `--recursive`.
 - **Project name**: the CMake project is still called `airplay2-receiver` so existing local scripts that reference `build/airplay2-receiver.bin` keep working.
