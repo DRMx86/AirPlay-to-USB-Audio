@@ -5,7 +5,8 @@ name: Web Radio to USB DAC - Build
 # and artifacts from different branches are easy to tell apart.
 on:
   push:
-    branches: [webradio-to-USB-Audio]
+    branches: ['**']
+  pull_request:
   workflow_dispatch:
 
 permissions:
