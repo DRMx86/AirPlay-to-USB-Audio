@@ -655,7 +655,8 @@ static esp_err_t connect_post(httpd_req_t *req) {
     return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad password");
   }
   if (s_trying_new) {
-    return httpd_resp_send_err(req, HTTPD_409_CONFLICT, "busy");
+    httpd_resp_set_status(req, "409 Conflict");
+    return httpd_resp_sendstr(req, "busy");
   }
 
   lock();
