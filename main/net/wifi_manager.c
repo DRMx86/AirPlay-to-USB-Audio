@@ -83,6 +83,7 @@ static char s_new_pass[65];
 static volatile bool s_trying_new;
 static int s_new_attempts;
 
+static volatile bool s_vol_touched; /* the page changed the volume */
 static volatile bool s_sta_wanted; /* keep (re)connecting the station */
 static volatile bool s_connected;
 static volatile bool s_portal;
@@ -792,7 +793,6 @@ static int s_saved_station = -1;
 static int s_saved_vol = -1;
 static int s_boot_last_vol = -1; /* volume of the previous session (1-100) */
 static bool s_vol_boot;          /* start at the last volume after a reboot */
-static volatile bool s_vol_touched;
 
 
 /* ── Stations ────────────────────────────────────────────────────────────── */
