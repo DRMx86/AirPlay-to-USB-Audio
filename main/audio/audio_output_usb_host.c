@@ -472,9 +472,9 @@ static esp_err_t uac_fu_set_mute(uint8_t fu_id, bool mute) {
  * leave most of a slider silent).  Devices without a Feature Unit volume get
  * the same curve as a digital gain on the PCM instead. */
 #define VOLUME_RANGE_DB 60
-/* Digital-gain range.  Smaller than the device range so that the low end of the
- * slider is still audible and not buried in 16-bit quantisation noise. */
-#define SW_VOLUME_RANGE_DB 40
+/* Digital-gain range: 1 % = -59.4 dB, 100 % = 0 dB, about 0.6 dB per step.
+ * TPDF dither (below) keeps the very quiet end clean in 16 bits. */
+#define SW_VOLUME_RANGE_DB 60
 
 typedef struct {
   uint8_t id;
@@ -486,6 +486,7 @@ static fu_vol_t s_fu_vol[sizeof(s_fu_ids)];
 static volatile int s_volume_pct = CONFIG_USB_AUDIO_INITIAL_VOLUME_PERCENT;
 static volatile bool s_hw_volume;      /* some Feature Unit has a volume */
 static volatile int32_t s_sw_gain_q15; /* 32768 = unity */
+static uint32_t s_dither = 0x12345678u;
 
 static esp_err_t uac_fu_set_volume(uint8_t fu_id, uint8_t channel,
                                    int16_t db_q8) {
@@ -895,7 +896,17 @@ size_t audio_output_write(const int16_t *pcm, size_t frames) {
         }
         const int16_t *src = (const int16_t *)((const uint8_t *)pcm + done);
         for (size_t i = 0; i < chunk / 2; i++) {
-          tmp[i] = (int16_t)(((int32_t)src[i] * gain) >> 15);
+          /* +-1 LSB triangular dither, then scale */
+          s_dither = s_dither * 1664525u + 1013904223u;
+          int32_t r = (int32_t)((s_dither >> 17) & 0x7FFF) +
+                      (int32_t)((s_dither >> 2) & 0x7FFF) - 32767;
+          int32_t v = ((int32_t)src[i] * gain + r) >> 15;
+          if (v > 32767) {
+            v = 32767;
+          } else if (v < -32768) {
+            v = -32768;
+          }
+          tmp[i] = (int16_t)v;
         }
         size_t sent = xStreamBufferSend(sb, tmp, chunk, 0);
         done += sent;

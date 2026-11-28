@@ -259,7 +259,10 @@ static void stream_once(size_t idx, uint32_t sel) {
     goto done;
   }
   esp_http_client_set_header(client, "Icy-MetaData", "1");
-  esp_http_client_set_header(client, "User-Agent", "esp32-webradio/1.0");
+  /* "Mozilla" makes SHOUTcast servers answer with a normal HTTP reply
+   * instead of "ICY 200 OK", which the HTTP client cannot parse. */
+  esp_http_client_set_header(client, "User-Agent",
+                             "Mozilla/5.0 (compatible; esp32-webradio/1.0)");
 
   if (!http_open(client, &info)) {
     goto done;

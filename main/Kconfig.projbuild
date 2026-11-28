@@ -111,8 +111,9 @@ menu "Web Radio to USB DAC Audio"
                 loud (or a DAC that defaults to maximum) must never blast.
                 0 starts muted. The volume can then be changed from the web
                 page. It is never saved: every restart starts at this level.
-                The percentage covers a 40 dB digital range (or the top 60 dB
-                of the DAC's own range when the DAC volume option is on).
+                The percentage covers a 60 dB digital range (about 0.6 dB per
+                step), or the top 60 dB of the DAC's own range when the DAC
+                volume option is on.
 
         config USB_AUDIO_DEVICE_VOLUME
             bool "Use the USB DAC's own volume control"

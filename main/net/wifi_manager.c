@@ -28,8 +28,11 @@
 #include "freertos/task.h"
 #include "freertos/timers.h"
 #include "lwip/inet.h"
+#include "lwip/sockets.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "radio_player.h"
+#include "stations.h"
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -46,6 +49,10 @@
 #define PORTAL_LINGER_MS 15000
 #define SAVED_RETRY_MS   (5 * 60 * 1000)
 #define BODY_MAX         256
+
+void radio_player_select(size_t index); /* radio_player.c */
+static void mdns_start_once(void);
+static void log_capture_start(void);
 
 extern const char portal_start[] asm("_binary_portal_html_start");
 extern const char portal_end[] asm("_binary_portal_html_end");
@@ -431,6 +438,7 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     s_state = WIFI_MANAGER_CONNECTED;
     s_retries = 0;
     s_was_connected = true;
+    mdns_start_once();
 
     if (s_trying_new) {
       esp_err_t err = creds_save(s_new_ssid, s_new_pass);
@@ -769,10 +777,376 @@ static esp_err_t not_found(httpd_req_t *req, httpd_err_code_t err) {
   return ESP_OK;
 }
 
+/* ── Stations ────────────────────────────────────────────────────────────── */
+
+static bool read_body(httpd_req_t *req, char *body, size_t size) {
+  if (req->content_len == 0 || req->content_len >= size) {
+    return false;
+  }
+  size_t got = 0;
+  while (got < req->content_len) {
+    int n = httpd_req_recv(req, body + got, req->content_len - got);
+    if (n <= 0) {
+      return false;
+    }
+    got += (size_t)n;
+  }
+  body[got] = '\0';
+  return true;
+}
+
+static int current_station_index(const radio_player_stats_t *st) {
+  for (size_t i = 0; i < g_station_count; i++) {
+    if (st->station == g_stations[i].name ||
+        (st->station && strcmp(st->station, g_stations[i].name) == 0)) {
+      return (int)i;
+    }
+  }
+  return 0;
+}
+
+static esp_err_t stations_get(httpd_req_t *req) {
+  radio_player_stats_t st;
+  radio_player_get_stats(&st);
+
+  size_t cap = 700 + g_station_count * 140;
+  char *p = malloc(cap);
+  if (!p) {
+    return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "memory");
+  }
+  p[0] = '\0';
+  jbuf_t j = {.p = p, .cap = cap};
+  j_raw(&j, "{\"current\":");
+  j_int(&j, current_station_index(&st));
+  j_raw(&j, ",\"streaming\":");
+  j_raw(&j, st.streaming ? "true" : "false");
+  j_raw(&j, ",\"title\":");
+  j_str(&j, st.title);
+  j_raw(&j, ",\"stations\":[");
+  for (size_t i = 0; i < g_station_count; i++) {
+    if (i) {
+      j_raw(&j, ",");
+    }
+    j_str(&j, g_stations[i].name);
+  }
+  j_raw(&j, "]}");
+  esp_err_t err = send_json(req, &j);
+  free(p);
+  return err;
+}
+
+static esp_err_t station_post(httpd_req_t *req) {
+  char body[64];
+  if (!read_body(req, body, sizeof(body))) {
+    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad request");
+  }
+  char idx[8];
+  if (form_get(body, "index", idx, sizeof(idx)) != 1 || idx[0] == '\0') {
+    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad index");
+  }
+  char *end = NULL;
+  long v = strtol(idx, &end, 10);
+  if (*end != '\0' || v < 0 || (size_t)v >= g_station_count) {
+    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad index");
+  }
+  radio_player_select((size_t)v);
+
+  char buf[40];
+  jbuf_t j = {.p = buf, .cap = sizeof(buf)};
+  buf[0] = '\0';
+  j_raw(&j, "{\"current\":");
+  j_int(&j, (int)v);
+  j_raw(&j, "}");
+  return send_json(req, &j);
+}
+
+/* ── Serial console on the web page ──────────────────────────────────────── */
+/* Everything the firmware logs is copied into a small ring buffer (and still
+ * goes to the UART), and the page polls /api/log?since=N for new text. */
+
+#define LOG_RING_BYTES 8192 /* power of two */
+#define LOG_CHUNK      1536
+
+static char s_log_ring[LOG_RING_BYTES];
+static uint32_t s_log_total;
+static portMUX_TYPE s_log_mux = portMUX_INITIALIZER_UNLOCKED;
+static vprintf_like_t s_log_prev;
+static bool s_log_started;
+
+static void log_push(const char *s, size_t n) {
+  portENTER_CRITICAL(&s_log_mux);
+  uint32_t t = s_log_total;
+  for (size_t i = 0; i < n; i++) {
+    s_log_ring[(t + i) & (LOG_RING_BYTES - 1)] = s[i];
+  }
+  s_log_total = t + (uint32_t)n;
+  portEXIT_CRITICAL(&s_log_mux);
+}
+
+static int log_vprintf(const char *fmt, va_list ap) {
+  va_list ap2;
+  va_copy(ap2, ap);
+  int ret = s_log_prev ? s_log_prev(fmt, ap) : vprintf(fmt, ap);
+  char line[192];
+  int n = vsnprintf(line, sizeof(line), fmt, ap2);
+  va_end(ap2);
+  if (n > 0) {
+    if (n >= (int)sizeof(line)) {
+      n = (int)sizeof(line) - 1;
+    }
+    int m = 0;
+    for (int i = 0; i < n; i++) { /* drop ANSI colour codes */
+      if (line[i] == 0x1b) {
+        while (i < n && line[i] != 'm') {
+          i++;
+        }
+        continue;
+      }
+      line[m++] = line[i];
+    }
+    log_push(line, (size_t)m);
+  }
+  return ret;
+}
+
+static void log_capture_start(void) {
+  if (s_log_started) {
+    return;
+  }
+  s_log_started = true;
+  s_log_prev = esp_log_set_vprintf(log_vprintf);
+}
+
+static esp_err_t log_get(httpd_req_t *req) {
+  uint32_t since = 0;
+  char q[40], v[16];
+  if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK &&
+      httpd_query_key_value(q, "since", v, sizeof(v)) == ESP_OK) {
+    since = (uint32_t)strtoul(v, NULL, 10);
+  }
+  char *buf = malloc(LOG_CHUNK);
+  if (!buf) {
+    return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "memory");
+  }
+
+  bool reset = false;
+  uint32_t start, next;
+  size_t len;
+  portENTER_CRITICAL(&s_log_mux);
+  uint32_t total = s_log_total;
+  uint32_t oldest = total > LOG_RING_BYTES ? total - LOG_RING_BYTES : 0;
+  start = since;
+  if (since > total) { /* the device restarted since the page last asked */
+    reset = true;
+    start = oldest;
+  } else if (start < oldest) {
+    start = oldest;
+  }
+  len = total - start;
+  if (len > LOG_CHUNK) {
+    len = LOG_CHUNK;
+  }
+  for (size_t i = 0; i < len; i++) {
+    buf[i] = s_log_ring[(start + i) & (LOG_RING_BYTES - 1)];
+  }
+  next = start + (uint32_t)len;
+  portEXIT_CRITICAL(&s_log_mux);
+
+  char nxt[16];
+  snprintf(nxt, sizeof(nxt), "%lu", (unsigned long)next);
+  httpd_resp_set_type(req, "text/plain; charset=utf-8");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  httpd_resp_set_hdr(req, "X-Next", nxt);
+  if (reset) {
+    httpd_resp_set_hdr(req, "X-Reset", "1");
+  }
+  esp_err_t err = httpd_resp_send(req, buf, (ssize_t)len);
+  free(buf);
+  return err;
+}
+
+/* ── mDNS: answers "webradio.local" ──────────────────────────────────────── */
+
+#define MDNS_PORT 5353
+#define MDNS_NAME "webradio.local"
+
+static volatile int s_mdns_announce;
+static bool s_mdns_started;
+
+/* Read a (non-compressed) name starting at pos into out as "a.b.c".
+ * Returns the position after the name, or 0 if it is not usable. */
+static size_t mdns_read_name(const uint8_t *pkt, size_t len, size_t pos,
+                             char *out, size_t out_size) {
+  size_t o = 0;
+  while (pos < len) {
+    uint8_t l = pkt[pos++];
+    if (l == 0) {
+      out[o] = '\0';
+      return pos;
+    }
+    if ((l & 0xC0) || pos + l > len || o + l + 2 > out_size) {
+      return 0;
+    }
+    if (o) {
+      out[o++] = '.';
+    }
+    for (uint8_t i = 0; i < l; i++) {
+      out[o++] = (char)tolower(pkt[pos++]);
+    }
+  }
+  return 0;
+}
+
+static size_t mdns_build(uint8_t *out, uint16_t id, const uint8_t *question,
+                         size_t qlen, uint32_t ip_be) {
+  size_t n = 0;
+  out[n++] = (uint8_t)(id >> 8);
+  out[n++] = (uint8_t)id;
+  out[n++] = 0x84; /* response, authoritative */
+  out[n++] = 0x00;
+  out[n++] = 0;
+  out[n++] = question ? 1 : 0; /* questions (legacy unicast only) */
+  out[n++] = 0;
+  out[n++] = 1; /* answers */
+  out[n++] = 0;
+  out[n++] = 0;
+  out[n++] = 0;
+  out[n++] = 0;
+  if (question) {
+    memcpy(out + n, question, qlen);
+    n += qlen;
+  }
+  static const uint8_t name[] = {8, 'w', 'e', 'b', 'r', 'a', 'd', 'i', 'o',
+                                 5, 'l', 'o', 'c', 'a', 'l', 0};
+  memcpy(out + n, name, sizeof(name));
+  n += sizeof(name);
+  out[n++] = 0;
+  out[n++] = 1; /* type A */
+  out[n++] = question ? 0x00 : 0x80; /* cache-flush bit for multicast */
+  out[n++] = 1; /* class IN */
+  out[n++] = 0;
+  out[n++] = 0;
+  out[n++] = 0;
+  out[n++] = 120; /* TTL */
+  out[n++] = 0;
+  out[n++] = 4;
+  memcpy(out + n, &ip_be, 4);
+  n += 4;
+  return n;
+}
+
+static void mdns_task(void *arg) {
+  (void)arg;
+  int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+  if (sock < 0) {
+    ESP_LOGW(TAG, "mDNS: no socket");
+    s_mdns_started = false;
+    vTaskDelete(NULL);
+    return;
+  }
+  int yes = 1;
+  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+
+  struct sockaddr_in any = {
+      .sin_family = AF_INET,
+      .sin_port = htons(MDNS_PORT),
+      .sin_addr.s_addr = htonl(INADDR_ANY),
+  };
+  if (bind(sock, (struct sockaddr *)&any, sizeof(any)) < 0) {
+    ESP_LOGW(TAG, "mDNS: bind failed");
+    close(sock);
+    s_mdns_started = false;
+    vTaskDelete(NULL);
+    return;
+  }
+  struct ip_mreq mreq = {
+      .imr_multiaddr.s_addr = inet_addr("224.0.0.251"),
+      .imr_interface.s_addr = htonl(INADDR_ANY),
+  };
+  if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) <
+      0) {
+    ESP_LOGW(TAG, "mDNS: could not join the multicast group");
+  }
+  uint8_t ttl = 255;
+  setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
+  struct timeval tv = {.tv_sec = 1, .tv_usec = 0};
+  setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+  struct sockaddr_in group = {
+      .sin_family = AF_INET,
+      .sin_port = htons(MDNS_PORT),
+      .sin_addr.s_addr = inet_addr("224.0.0.251"),
+  };
+  ESP_LOGI(TAG, "mDNS: answering http://" MDNS_NAME "/");
+
+  uint8_t rx[512];
+  uint8_t tx[160];
+  while (true) {
+    esp_netif_ip_info_t ip;
+    bool have_ip = s_sta_netif &&
+                   esp_netif_get_ip_info(s_sta_netif, &ip) == ESP_OK &&
+                   ip.ip.addr != 0;
+
+    if (s_mdns_announce > 0) { /* unsolicited announcement after (re)connect */
+      s_mdns_announce--;
+      if (have_ip) {
+        size_t n = mdns_build(tx, 0, NULL, 0, ip.ip.addr);
+        sendto(sock, tx, n, 0, (struct sockaddr *)&group, sizeof(group));
+      }
+    }
+
+    struct sockaddr_in from;
+    socklen_t fl = sizeof(from);
+    int len = recvfrom(sock, rx, sizeof(rx), 0, (struct sockaddr *)&from, &fl);
+    if (len < 12 || !have_ip) {
+      continue;
+    }
+    if (rx[2] & 0x80) {
+      continue; /* a response, not a query */
+    }
+    int qd = (rx[4] << 8) | rx[5];
+    size_t pos = 12;
+    for (int i = 0; i < qd && pos < (size_t)len; i++) {
+      size_t qstart = pos;
+      char name[64];
+      pos = mdns_read_name(rx, (size_t)len, pos, name, sizeof(name));
+      if (pos == 0 || pos + 4 > (size_t)len) {
+        break;
+      }
+      int type = (rx[pos] << 8) | rx[pos + 1];
+      pos += 4;
+      if (strcmp(name, MDNS_NAME) != 0 || (type != 1 && type != 255)) {
+        continue;
+      }
+      uint16_t id = (uint16_t)((rx[0] << 8) | rx[1]);
+      if (ntohs(from.sin_port) == MDNS_PORT) {
+        size_t n = mdns_build(tx, 0, NULL, 0, ip.ip.addr);
+        sendto(sock, tx, n, 0, (struct sockaddr *)&group, sizeof(group));
+      } else { /* plain unicast DNS query (e.g. nslookup) */
+        size_t n = mdns_build(tx, id, rx + qstart, pos - qstart, ip.ip.addr);
+        sendto(sock, tx, n, 0, (struct sockaddr *)&from, sizeof(from));
+      }
+      break;
+    }
+  }
+}
+
+static void mdns_start_once(void) {
+  s_mdns_announce = 3;
+  if (s_mdns_started) {
+    return;
+  }
+  s_mdns_started = true;
+  if (xTaskCreate(mdns_task, "mdns", 4096, NULL, 4, NULL) != pdPASS) {
+    s_mdns_started = false;
+  }
+}
+
 static esp_err_t web_start(void) {
   httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
   cfg.stack_size = 6144;
   cfg.max_open_sockets = 7;
+  cfg.max_uri_handlers = 16;
   cfg.lru_purge_enable = true;
 
   /* Redirecting probe traffic makes the server log lots of harmless errors. */
@@ -791,6 +1165,9 @@ static esp_err_t web_start(void) {
       {.uri = "/api/connect", .method = HTTP_POST, .handler = connect_post},
       {.uri = "/api/forget", .method = HTTP_POST, .handler = forget_post},
       {.uri = "/api/volume", .method = HTTP_POST, .handler = volume_post},
+      {.uri = "/api/stations", .method = HTTP_GET, .handler = stations_get},
+      {.uri = "/api/station", .method = HTTP_POST, .handler = station_post},
+      {.uri = "/api/log", .method = HTTP_GET, .handler = log_get},
   };
   for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
     httpd_register_uri_handler(s_httpd, &uris[i]);
@@ -802,6 +1179,7 @@ static esp_err_t web_start(void) {
 /* ── Public API ──────────────────────────────────────────────────────────── */
 
 esp_err_t wifi_manager_start(void) {
+  log_capture_start();
   esp_err_t err = nvs_flash_init();
   if (err == ESP_ERR_NVS_NO_FREE_PAGES ||
       err == ESP_ERR_NVS_NEW_VERSION_FOUND) {

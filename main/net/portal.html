@@ -84,6 +84,21 @@ input[type=range]::-moz-range-thumb{width:24px;height:24px;border-radius:50%;bac
 .mark{width:44px;height:44px;margin:0 auto;border-radius:50%;display:grid;place-items:center;font-size:22px}
 .mark.ok{background:rgba(94,234,212,.12);color:var(--accent)}
 .mark.bad{background:rgba(248,113,113,.12);color:var(--err)}
+.hright{display:flex;align-items:center;gap:8px}
+.now{font-size:14px;color:var(--muted);margin:0 2px 10px;min-height:20px;overflow-wrap:anywhere}
+.row .tag.dim{color:var(--muted)}
+.bars{display:inline-flex;gap:2px;align-items:flex-end;height:14px}
+.bars b{width:3px;background:var(--accent);border-radius:1px;animation:eq 0.9s ease-in-out infinite}
+.bars b:nth-child(2){animation-delay:.2s}.bars b:nth-child(3){animation-delay:.4s}
+@keyframes eq{0%,100%{height:4px}50%{height:14px}}
+.consolebar{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.consolebar h2{flex:1}
+#logbox{background:#07090b;border:1px solid var(--line);border-radius:10px;padding:10px;
+  height:calc(100vh - 190px);min-height:280px;overflow:auto;
+  font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#cbd5e1;word-break:break-all}
+#logbox div{white-space:pre-wrap}
+#logbox .e{color:var(--err)}#logbox .w{color:var(--warn)}#logbox .i{color:#9be7c4}
+@media (prefers-reduced-motion:reduce){.bars b{animation:none;height:10px}}
 @media (prefers-reduced-motion:reduce){.spin,.pill.wait i{animation:none}}
 </style>
 </head>
@@ -94,8 +109,13 @@ input[type=range]::-moz-range-thumb{width:24px;height:24px;border-radius:50%;bac
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9v6M8 5v14M12 8v8M16 3v18M20 9v6"/></svg>
       <h1>WebRadio</h1>
     </div>
-    <div id="pill" class="pill" role="status"><i></i><span>Loading</span></div>
+    <div class="hright">
+      <button id="conbtn" class="ghost" type="button" aria-expanded="false">Console</button>
+      <div id="pill" class="pill" role="status"><i></i><span>Loading</span></div>
+    </div>
   </header>
+
+  <div id="mainview">
 
   <section id="now" class="card" hidden>
     <dl class="kv">
@@ -116,6 +136,15 @@ input[type=range]::-moz-range-thumb{width:24px;height:24px;border-radius:50%;bac
     <p id="volnote" class="note"></p>
   </section>
 
+  <section id="stations">
+    <div class="head"><h2>Stations</h2></div>
+    <div class="card list">
+      <p id="nowp" class="now" style="margin:12px 16px 0"></p>
+      <ul id="slist"></ul>
+      <p id="sempty" class="note center" hidden>No stations configured.</p>
+    </div>
+  </section>
+
   <section id="picker">
     <div class="head"><h2>Wi-Fi networks</h2><button id="rescan" class="ghost" type="button">Rescan</button></div>
     <div class="card list">
@@ -125,6 +154,17 @@ input[type=range]::-moz-range-thumb{width:24px;height:24px;border-radius:50%;bac
   </section>
 
   <section id="busy" class="card center" hidden aria-live="polite"></section>
+  </div>
+
+  <section id="console" hidden>
+    <div class="consolebar">
+      <h2>Serial console</h2>
+      <button id="logpause" class="ghost" type="button">Pause</button>
+      <button id="logclear" class="ghost" type="button">Clear</button>
+      <button id="logback" class="ghost" type="button">Back</button>
+    </div>
+    <div id="logbox" role="log" aria-live="off"></div>
+  </section>
 </main>
 
 <script>
@@ -310,20 +350,104 @@ vr.oninput=()=>{
   clearTimeout(volTimer);volTimer=setTimeout(sendVol,120);
 };
 vr.onchange=()=>{clearTimeout(volTimer);sendVol()};
-/* -/+ buttons: 5 % per tap */
+/* -/+ buttons: 1 % per tap (about 0.6 dB) */
 const stepVol=d=>{
   const v=Math.max(0,Math.min(100,(+vr.value)+d));
   vr.value=v;
   vr.oninput();
   vr.onchange();
 };
-$("#vold").onclick=()=>stepVol(-5);
-$("#volu").onclick=()=>stepVol(5);
+$("#vold").onclick=()=>stepVol(-1);
+$("#volu").onclick=()=>stepVol(1);
+
+/* ---- stations ---- */
+let sd={current:0,streaming:false,title:"",stations:[]};
+function renderStations(){
+  const ul=$("#slist");
+  ul.textContent="";
+  $("#sempty").hidden=sd.stations.length>0;
+  $("#nowp").hidden=sd.stations.length===0;
+  const cur=sd.stations[sd.current]||"";
+  $("#nowp").textContent=!sd.stations.length?"":
+    !sd.streaming?"Connecting to "+cur+"…":(sd.title?"Now playing: "+sd.title:"Playing "+cur);
+  sd.stations.forEach((name,i)=>{
+    const li=el("li");
+    const b=el("button","row");
+    b.type="button";
+    b.appendChild(el("span","name",name));
+    if(i===sd.current){
+      if(sd.streaming){const eq=el("span","bars");eq.append(el("b"),el("b"),el("b"));b.appendChild(eq)}
+      else b.appendChild(el("span","tag dim","Connecting"));
+    }
+    b.onclick=()=>pickStation(i);
+    li.appendChild(b);ul.appendChild(li);
+  });
+}
+async function refreshStations(){
+  try{sd=await api("/api/stations");renderStations()}catch(_){}
+}
+async function pickStation(i){
+  if(i===sd.current&&sd.streaming)return;
+  sd.current=i;sd.streaming=false;sd.title="";renderStations();
+  try{await post("/api/station",{index:i})}catch(_){}
+  setTimeout(refreshStations,1500);
+}
+
+/* ---- serial console ---- */
+let logOn=false,logPaused=false,logPos=0,logTimer=0,logPart="";
+const box=$("#logbox");
+function logClear(){box.textContent="";logPart=""}
+function logAdd(t){
+  const stick=box.scrollTop+box.clientHeight>=box.scrollHeight-24;
+  const lines=(logPart+t).split("\n");
+  logPart=lines.pop();
+  for(const l of lines){
+    if(!l)continue;
+    const d=el("div",/^E \(/.test(l)?"e":/^W \(/.test(l)?"w":/^I \(/.test(l)?"i":"",l);
+    box.appendChild(d);
+  }
+  while(box.childNodes.length>600)box.removeChild(box.firstChild);
+  if(stick)box.scrollTop=box.scrollHeight;
+}
+async function logPoll(){
+  clearTimeout(logTimer);
+  if(!logOn||logPaused)return;
+  let wait=1000;
+  try{
+    const r=await fetch("/api/log?since="+logPos,{cache:"no-store"});
+    if(r.ok){
+      if(r.headers.get("X-Reset"))logClear();
+      const next=parseInt(r.headers.get("X-Next"),10);
+      const t=await r.text();
+      if(!isNaN(next))logPos=next;
+      if(t)logAdd(t);
+      if(t.length>=1400)wait=60;
+    }else wait=2500;
+  }catch(_){wait=2500}
+  logTimer=setTimeout(logPoll,wait);
+}
+function logOpen(on){
+  logOn=on;
+  $("#mainview").hidden=on;
+  $("#console").hidden=!on;
+  $("#conbtn").setAttribute("aria-expanded",String(on));
+  $("#conbtn").textContent=on?"Radio":"Console";
+  if(on){logPaused=false;$("#logpause").textContent="Pause";logPoll()}
+  else clearTimeout(logTimer);
+}
+$("#conbtn").onclick=()=>logOpen(!logOn);
+$("#logback").onclick=()=>logOpen(false);
+$("#logclear").onclick=logClear;
+$("#logpause").onclick=()=>{
+  logPaused=!logPaused;
+  $("#logpause").textContent=logPaused?"Resume":"Pause";
+  if(!logPaused)logPoll();
+};
 
 $("#rescan").onclick=()=>loadNets(true);
 
-refresh().then(()=>loadNets(true));
-setInterval(()=>{if(!working&&!document.hidden)refresh()},4000);
+refresh().then(()=>{loadNets(true);refreshStations()});
+setInterval(()=>{if(!working&&!document.hidden&&!logOn){refresh();refreshStations()}},4000);
 })();
 </script>
 </body>
