@@ -63,8 +63,10 @@ input::placeholder{color:#5d6773}
 .note{font-size:14px;color:var(--muted);margin:10px 2px 0}
 .err{color:var(--err)}
 .vol{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.volrow{display:flex;align-items:center;gap:12px}
+.volrow .ghost{flex:none;width:40px;height:40px;padding:0;font-size:22px;line-height:1}
 output{font-variant-numeric:tabular-nums;font-weight:600}
-input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:28px;background:none;margin:0}
+input[type=range]{-webkit-appearance:none;appearance:none;flex:1;min-width:0;width:100%;height:28px;background:none;margin:0}
 input[type=range]{--p:0%}
 input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;
   background:linear-gradient(to right,var(--accent) var(--p),var(--line) var(--p))}
@@ -104,9 +106,13 @@ input[type=range]::-moz-range-thumb{width:24px;height:24px;border-radius:50%;bac
     <button id="forget" class="btn danger block" type="button">Forget this network</button>
   </section>
 
-  <section id="vol" class="card" hidden>
+  <section id="vol" class="card">
     <div class="vol"><h2>Volume</h2><output id="volv" for="volr">0%</output></div>
-    <input id="volr" type="range" min="0" max="100" step="1" value="0" aria-label="Volume">
+    <div class="volrow">
+      <button id="vold" class="ghost" type="button" aria-label="Volume down">&minus;</button>
+      <input id="volr" type="range" min="0" max="100" step="1" value="0" aria-label="Volume">
+      <button id="volu" class="ghost" type="button" aria-label="Volume up">+</button>
+    </div>
     <p id="volnote" class="note"></p>
   </section>
 
@@ -153,15 +159,16 @@ function showStatus(s){
   pill.className="pill "+(on?"on":s.state==="connecting"?"wait":"setup");
   pill.lastChild.textContent=on?"Online":s.state==="connecting"?"Connecting":"Setup mode";
   $("#now").hidden=!on||working;
-  $("#vol").hidden=!on||working;
+  $("#vol").hidden=working; /* volume works in setup mode too */
   if(on){
     $("#k-ssid").textContent=s.ssid||"-";
     $("#k-ip").textContent=s.ip||"-";
     $("#k-sig").textContent=s.rssi?quality(s.rssi):"-";
-    if(Date.now()-lastVol>2500){setVol(s.volume)}
-    $("#volnote").textContent=!s.dac?"No USB speaker connected.":
-      s.hw?"Using the speaker's own volume control.":"Digital volume (this speaker has no volume control).";
   }
+  if(Date.now()-lastVol>2500){setVol(s.volume)}
+  $("#volnote").textContent=!s.dac?"No USB speaker connected.":
+    s.hw?"Using the speaker's own volume control.":
+    "Digital volume. It always starts low after a restart.";
   if(changed&&!working)render(); /* refresh the "Connected" tag */
 }
 function setVol(v){$("#volr").value=v;$("#volr").style.setProperty("--p",v+"%");$("#volv").textContent=v+"%"}
@@ -303,6 +310,15 @@ vr.oninput=()=>{
   clearTimeout(volTimer);volTimer=setTimeout(sendVol,120);
 };
 vr.onchange=()=>{clearTimeout(volTimer);sendVol()};
+/* -/+ buttons: 5 % per tap */
+const stepVol=d=>{
+  const v=Math.max(0,Math.min(100,(+vr.value)+d));
+  vr.value=v;
+  vr.oninput();
+  vr.onchange();
+};
+$("#vold").onclick=()=>stepVol(-5);
+$("#volu").onclick=()=>stepVol(5);
 
 $("#rescan").onclick=()=>loadNets(true);
 
